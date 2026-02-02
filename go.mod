@@ -1,11 +1,11 @@
 module github.com/meysam81/csp-report-collector
 
-go 1.24.5
+go 1.25.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/goccy/go-json v0.10.5
-	github.com/meysam81/x v1.11.2
+	github.com/meysam81/x v1.13.0
 	github.com/redis/go-redis/v9 v9.12.1
 )
 
