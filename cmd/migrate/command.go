@@ -35,7 +35,9 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	redisClient, err := iredis.New(ctx, &cfg.Redis)
+	log.Info().Msg("configuration loaded")
+
+	redisClient, err := iredis.New(ctx, &cfg.Redis, log)
 	if err != nil {
 		return fmt.Errorf("connecting to redis: %w", err)
 	}

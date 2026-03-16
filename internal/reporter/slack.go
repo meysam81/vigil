@@ -59,6 +59,8 @@ func (s *SlackNotifier) Name() string { return "slack" }
 
 // Send formats and delivers the report to Slack with retry and jitter.
 func (s *SlackNotifier) Send(ctx context.Context, rpt *report) error {
+	s.log.Debug().Int("violations", rpt.Total).Msg("preparing slack report")
+
 	msg := formatReport(rpt)
 
 	body, err := json.Marshal(slackPayload{Text: msg})
@@ -75,6 +77,7 @@ func (s *SlackNotifier) Send(ctx context.Context, rpt *report) error {
 
 		lastErr = s.post(ctx, body)
 		if lastErr == nil {
+			s.log.Info().Int("violations", rpt.Total).Msg("slack report delivered")
 			return nil
 		}
 

@@ -36,6 +36,7 @@ func RateLimitMiddleware(redisClient *goredis.Client, cfg *config.RateLimitConfi
 			w.Header().Set("X-Ratelimit-Remaining", fmt.Sprintf("%d", rate.Remaining))
 
 			if !rate.Allowed {
+				log.Warn().Str("client_ip", clientIP).Int64("remaining", rate.Remaining).Msg("rate limit exceeded")
 				retryAfter := int(time.Until(rate.ResetAt()).Seconds())
 				if retryAfter < 1 {
 					retryAfter = 1

@@ -82,10 +82,14 @@ func (r *Reporter) aggregate(ctx context.Context, since, now time.Time) (*report
 		return nil, fmt.Errorf("querying timeline index: %w", err)
 	}
 
+	r.log.Debug().Int("keys_found", len(keys)).Msg("timeline query completed")
+
 	// Batch MGET in chunks to avoid oversized commands
 	for i := 0; i < len(keys); i += mgetBatchSize {
 		end := min(i+mgetBatchSize, len(keys))
 		chunk := keys[i:end]
+
+		r.log.Debug().Int("batch", i/mgetBatchSize+1).Int("batch_size", len(chunk)).Msg("fetching report batch")
 
 		vals, err := r.redis.MGet(ctx, chunk...).Result()
 		if err != nil {

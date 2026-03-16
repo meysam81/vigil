@@ -32,7 +32,9 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	redisClient, err := iredis.New(ctx, &cfg.Redis)
+	log.Info().Msg("configuration loaded and validated")
+
+	redisClient, err := iredis.New(ctx, &cfg.Redis, log)
 	if err != nil {
 		return fmt.Errorf("connecting to redis: %w", err)
 	}
@@ -61,8 +63,10 @@ func run(ctx context.Context) error {
 			MaxAge:         300,
 		}))
 	}
+	log.Debug().Bool("cors_enabled", cfg.CORS.Enabled).Msg("CORS configuration")
 
 	mw.Use(middleware.RateLimitMiddleware(redisClient, &cfg.RateLimit, log))
+	log.Debug().Int("max_rps", cfg.RateLimit.MaxRPS).Float64("refill_rate", float64(cfg.RateLimit.RefillRate)).Msg("rate limit configuration")
 	mw.Mount("/", api)
 
 	api.Post("/", h.HandleReport)

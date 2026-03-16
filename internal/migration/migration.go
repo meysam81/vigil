@@ -26,7 +26,7 @@ func Run(ctx context.Context, redis *goredis.Client, log *logger.Logger) error {
 		return fmt.Errorf("checking migration state: %w", err)
 	}
 	if exists > 0 {
-		log.Debug().Msg("timeline backfill already completed, skipping migration")
+		log.Debug().Str("state_key", stateKey).Msg("timeline backfill already completed, skipping migration")
 		return nil
 	}
 

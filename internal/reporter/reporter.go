@@ -52,6 +52,8 @@ func (r *Reporter) Start(ctx context.Context) error {
 		st = &state{}
 	}
 
+	r.log.Info().Dur("interval", r.cfg.ReportInterval).Msg("reporter started")
+
 	if r.isOverdue(st) {
 		r.log.Info().Msg("reporter overdue, sending immediate report")
 		r.runCycle(ctx, st)
@@ -94,6 +96,8 @@ func (r *Reporter) runCycle(ctx context.Context, st *state) {
 	if st.LastSuccessAt == 0 {
 		since = now.Add(-r.cfg.ReportInterval)
 	}
+
+	r.log.Debug().Time("since", since).Time("until", now).Msg("reporter cycle starting")
 
 	rpt, err := r.aggregate(ctx, since, now)
 	if err != nil {

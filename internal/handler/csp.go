@@ -24,11 +24,13 @@ func (h *Handler) HandleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	contentType = strings.ToLower(contentType)
 
+	h.log.Debug().Str("method", r.Method).Str("content_type", contentType).Msg("report request received")
+
 	switch contentType {
 	case "application/reports+json", "application/csp-report", "application/json":
 		// valid content types
 	default:
-		h.log.Error().Str("content_type", contentType).Msg("invalid content type rejected")
+		h.log.Warn().Str("content_type", contentType).Msg("invalid content type rejected")
 		httperr.BadRequest(w, httperr.MsgBadContentType)
 		return
 	}
@@ -72,7 +74,7 @@ func (h *Handler) HandleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Info().Int("count", len(reports)).Msg("stored csp violation report(s)")
+	h.log.Info().Int("count", len(reports)).Int("body_size", len(body)).Msg("stored csp violation report(s)")
 	w.WriteHeader(http.StatusNoContent)
 }
 
