@@ -1,6 +1,7 @@
 *
 !*.go
-!go.mod
-!go.sum
 !LICENSE
 !cmd
+!go.mod
+!go.sum
+!internal
