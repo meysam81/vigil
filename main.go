@@ -2,43 +2,57 @@ package main
 
 import (
 	"context"
-	"log"
-	"net/http"
+	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
-	"time"
+
+	"github.com/urfave/cli/v3"
+
+	"github.com/meysam81/csp-report-collector/cmd/server"
+	"github.com/meysam81/csp-report-collector/internal/logger"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM)
-	defer stop()
-
-	config, err := NewConfig()
-	if err != nil {
-		log.Fatalf("failed initialing config: %s", err)
+	cli.VersionPrinter = func(c *cli.Command) {
+		fmt.Println(version)
 	}
 
-	ctxS, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	app, err := NewApp(ctx, config)
-	if err != nil {
-		log.Fatalf("failed initialing app: %s", err)
+	cmd := &cli.Command{
+		Name:                  "csp-report-collector",
+		Usage:                 "Collect and store CSP violation reports.",
+		Version:               version,
+		EnableShellCompletion: true,
+		Suggest:               true,
+		DefaultCommand:        "server",
+		Commands: []*cli.Command{
+			server.Command(),
+			{
+				Name:    "version",
+				Aliases: []string{"v"},
+				Usage:   "Show detailed version information",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					fmt.Printf("version: %s\ncommit: %s\ndate: %s\nbuilt by: %s\n", version, commit, date, builtBy)
+					return nil
+				},
+			},
+		},
 	}
 
-	go func() {
-		defer cancel()
-		app.logger.Info().Msgf("listening on address: %s", app.handler.Addr)
-		if err := app.handler.ListenAndServe(); err != http.ErrServerClosed {
-			app.logger.Error().Err(err).Msg("failed shutting down the server")
-		}
-	}()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM)
 
-	<-ctx.Done()
-	stop()
-
-	app.logger.Info().Msg("shutdown signal received. waiting for server to close.")
-
-	<-ctxS.Done()
-	app.logger.Info().Msg("shutdown complete. bye bye.")
+	if err := cmd.Run(ctx, os.Args); err != nil {
+		log := logger.NewLogger("error", true)
+		log.Error().Err(err).Msg("fatal error")
+		cancel()
+		os.Exit(1)
+	}
+	cancel()
 }

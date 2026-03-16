@@ -1,9 +1,8 @@
-package main
+package handler_test
 
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,39 +10,46 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/meysam81/x/logging"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/meysam81/csp-report-collector/internal/config"
+	"github.com/meysam81/csp-report-collector/internal/handler"
+	"github.com/meysam81/csp-report-collector/internal/logger"
 )
 
 var (
-	router      *chi.Mux
-	redisClient *redis.Client
-	appstate    *AppState
-	logger      = logging.NewLogger()
-
-	recorder = httptest.NewRecorder()
+	testHandler *handler.Handler
+	testRouter  *chi.Mux
 )
 
 func TestMain(m *testing.M) {
-	router = chi.NewRouter()
-	redisClient, _ = NewRedis(context.TODO(), &Config{
-		RedisHost: "localhost",
-		RedisPort: 6379,
-	})
-	appstate = &AppState{
-		redisClient: redisClient,
-		logger:      &logger,
+	cfg := &config.Config{
+		LogLevel: "error",
+		Redis: config.RedisConfig{
+			Host: "localhost",
+			Port: 6379,
+		},
 	}
+
+	log := logger.NewLogger("error", true)
+
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	if _, err := redisClient.Ping(context.TODO()).Result(); err != nil {
+		panic("redis not available: " + err.Error())
+	}
+
+	testHandler = handler.New(redisClient, log, cfg)
+	testRouter = chi.NewRouter()
+	testRouter.Post("/", testHandler.ReceiverCSPViolation)
 
 	os.Exit(m.Run())
 }
 
 func TestPostCSPViolationReportURI(t *testing.T) {
-	router.Post("/", appstate.ReceiverCSPViolation)
-
 	var body bytes.Buffer
-	body.Write([]byte(`
-{
+	body.WriteString(`{
   "csp-report": {
     "blocked-uri": "http://example.com/css/style.css",
     "disposition": "report",
@@ -54,26 +60,23 @@ func TestPostCSPViolationReportURI(t *testing.T) {
     "status-code": 200,
     "violated-directive": "style-src-elem"
   }
-}
-	`))
-	req, _ := http.NewRequest(http.MethodPost, "/", &body)
-	req.Header.Set("content-type", "application/csp-report; charset=utf-8")
+}`)
 
-	router.ServeHTTP(recorder, req)
+	req, _ := http.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", "application/csp-report; charset=utf-8")
+
+	recorder := httptest.NewRecorder()
+	testRouter.ServeHTTP(recorder, req)
 
 	if recorder.Result().StatusCode != http.StatusNoContent {
 		r, _ := io.ReadAll(recorder.Body)
-		fmt.Println(string(r))
-		t.Fatalf("expected %d, but got %s", http.StatusNoContent, recorder.Result().Status)
+		t.Fatalf("expected %d, got %d: %s", http.StatusNoContent, recorder.Result().StatusCode, string(r))
 	}
 }
 
 func TestPostCSPViolationReportTo(t *testing.T) {
-	router.Post("/", appstate.ReceiverCSPViolation)
-
 	var body bytes.Buffer
-	body.Write([]byte(`
-{
+	body.WriteString(`{
   "age": 53531,
   "body": {
     "blockedURL": "inline",
@@ -91,16 +94,16 @@ func TestPostCSPViolationReportTo(t *testing.T) {
   "type": "csp-violation",
   "url": "https://example.com/csp-report",
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-}
-	`))
-	req, _ := http.NewRequest(http.MethodPost, "/", &body)
-	req.Header.Set("content-type", "application/reports+json; charset=utf-8")
+}`)
 
-	router.ServeHTTP(recorder, req)
+	req, _ := http.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", "application/reports+json; charset=utf-8")
+
+	recorder := httptest.NewRecorder()
+	testRouter.ServeHTTP(recorder, req)
 
 	if recorder.Result().StatusCode != http.StatusNoContent {
 		r, _ := io.ReadAll(recorder.Body)
-		fmt.Println(string(r))
-		t.Fatalf("expected %d, but got %s", http.StatusNoContent, recorder.Result().Status)
+		t.Fatalf("expected %d, got %d: %s", http.StatusNoContent, recorder.Result().StatusCode, string(r))
 	}
 }

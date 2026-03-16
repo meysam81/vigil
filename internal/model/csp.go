@@ -1,13 +1,6 @@
-package main
+package model
 
-import (
-	"net/http"
-
-	"github.com/meysam81/x/logging"
-	"github.com/redis/go-redis/v9"
-)
-
-// modern CSP report structure with content-type application/reports+json
+// ReportTo is the modern CSP report structure (content-type: application/reports+json).
 type ReportTo struct {
 	Age  int `json:"age"`
 	Body struct {
@@ -28,7 +21,7 @@ type ReportTo struct {
 	UserAgent string `json:"user_agent"`
 }
 
-// legacy report structure with content-type application/csp-report
+// ReportURI is the legacy CSP report structure (content-type: application/csp-report).
 type ReportURI struct {
 	CSPReport struct {
 		BlockedURI         string `json:"blocked-uri"`
@@ -40,11 +33,4 @@ type ReportURI struct {
 		StatusCode         int    `json:"status-code"`
 		ViolatedDirective  string `json:"violated-directive"`
 	} `json:"csp-report"`
-}
-
-type AppState struct {
-	redisClient *redis.Client
-	logger      *logging.Logger
-	handler     *http.Server
-	config      *Config
 }
