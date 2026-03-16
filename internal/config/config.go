@@ -33,12 +33,18 @@ type CORSConfig struct {
 	AllowedOrigins string `env:"CORS_ALLOWED_ORIGINS" envDefault:"*"`
 }
 
+type SlackConfig struct {
+	WebhookURL     string        `env:"SLACK_WEBHOOK_URL"`
+	ReportInterval time.Duration `env:"REPORT_INTERVAL" envDefault:"24h"`
+}
+
 type Config struct {
 	LogLevel  string `env:"LOG_LEVEL" envDefault:"info"`
 	Server    ServerConfig
 	Redis     RedisConfig
 	RateLimit RateLimitConfig
 	CORS      CORSConfig
+	Slack     SlackConfig
 }
 
 func Load() (*Config, error) {
@@ -53,6 +59,9 @@ func (c *Config) Validate() error {
 	var errs []error
 	if strings.TrimSpace(c.Redis.Host) == "" {
 		errs = append(errs, errors.New("REDIS_HOST is required"))
+	}
+	if url := strings.TrimSpace(c.Slack.WebhookURL); url != "" && !strings.HasPrefix(url, "https://") {
+		errs = append(errs, errors.New("SLACK_WEBHOOK_URL must use https://"))
 	}
 	return errors.Join(errs...)
 }

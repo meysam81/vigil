@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	json "github.com/goccy/go-json"
+	"github.com/goccy/go-json"
 
 	"github.com/meysam81/vigil/internal/httperr"
 )

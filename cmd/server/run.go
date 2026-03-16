@@ -14,6 +14,7 @@ import (
 	"github.com/meysam81/vigil/internal/logger"
 	"github.com/meysam81/vigil/internal/middleware"
 	iredis "github.com/meysam81/vigil/internal/redis"
+	"github.com/meysam81/vigil/internal/reporter"
 	"github.com/meysam81/x/chimux"
 )
 
@@ -73,6 +74,15 @@ func run(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1MiB
 		Handler:           root,
+	}
+
+	if cfg.Slack.WebhookURL != "" {
+		rpt := reporter.New(redisClient, log, &cfg.Slack)
+		go func() {
+			if err := rpt.Start(ctx); err != nil {
+				log.Error().Err(err).Msg("reporter stopped with error")
+			}
+		}()
 	}
 
 	errCh := make(chan error, 1)

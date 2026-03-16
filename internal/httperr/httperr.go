@@ -3,7 +3,7 @@ package httperr
 import (
 	"net/http"
 
-	json "github.com/goccy/go-json"
+	"github.com/goccy/go-json"
 )
 
 const (
