@@ -11,6 +11,7 @@ const (
 	MsgBadContentType  = "Bad content-type provided. Only application/reports+json, application/csp-report & application/json is acceptable."
 	MsgInvalidBody     = "Invalid request body"
 	MsgTooManyRequests = "Too many requests"
+	MsgRequestTooLarge = "Request body too large"
 )
 
 type errorResponse struct {
@@ -33,4 +34,8 @@ func BadRequest(w http.ResponseWriter, msg string) {
 
 func TooManyRequests(w http.ResponseWriter) {
 	WriteError(w, http.StatusTooManyRequests, MsgTooManyRequests)
+}
+
+func RequestTooLarge(w http.ResponseWriter) {
+	WriteError(w, http.StatusRequestEntityTooLarge, MsgRequestTooLarge)
 }

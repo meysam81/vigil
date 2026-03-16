@@ -1,22 +1,26 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
 
 type ServerConfig struct {
-	Port int `env:"PORT" envDefault:"8080"`
+	Port        int   `env:"PORT" envDefault:"8080"`
+	MaxBodySize int64 `env:"MAX_BODY_SIZE" envDefault:"65536"` // 64KB
 }
 
 type RedisConfig struct {
-	Host        string `env:"REDIS_HOST"`
-	Port        int    `env:"REDIS_PORT" envDefault:"6379"`
-	DB          int    `env:"REDIS_DB" envDefault:"0"`
-	Password    string `env:"REDIS_PASSWORD"`
-	SSLRequired bool   `env:"REDIS_SSL_ENABLED" envDefault:"false"`
+	Host        string        `env:"REDIS_HOST"`
+	Port        int           `env:"REDIS_PORT" envDefault:"6379"`
+	DB          int           `env:"REDIS_DB" envDefault:"0"`
+	Password    string        `env:"REDIS_PASSWORD"`
+	SSLRequired bool          `env:"REDIS_SSL_ENABLED" envDefault:"false"`
+	KeyTTL      time.Duration `env:"REDIS_KEY_TTL" envDefault:"720h"` // 30 days
 }
 
 type RateLimitConfig struct {
@@ -30,11 +34,11 @@ type CORSConfig struct {
 }
 
 type Config struct {
-	LogLevel  string          `env:"LOG_LEVEL" envDefault:"info"`
-	Server    ServerConfig    `envPrefix:""`
-	Redis     RedisConfig     `envPrefix:""`
-	RateLimit RateLimitConfig `envPrefix:""`
-	CORS      CORSConfig      `envPrefix:""`
+	LogLevel  string `env:"LOG_LEVEL" envDefault:"info"`
+	Server    ServerConfig
+	Redis     RedisConfig
+	RateLimit RateLimitConfig
+	CORS      CORSConfig
 }
 
 func Load() (*Config, error) {
@@ -45,10 +49,10 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-func (c *Config) Validate() []string {
-	var errs []string
+func (c *Config) Validate() error {
+	var errs []error
 	if strings.TrimSpace(c.Redis.Host) == "" {
-		errs = append(errs, "REDIS_HOST is required")
+		errs = append(errs, errors.New("REDIS_HOST is required"))
 	}
-	return errs
+	return errors.Join(errs...)
 }

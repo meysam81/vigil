@@ -23,13 +23,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	log = logger.NewLogger(cfg.LogLevel, false)
+	log := logger.NewLogger(cfg.LogLevel, false)
 
-	if errs := cfg.Validate(); len(errs) > 0 {
-		for _, e := range errs {
-			log.Error().Msg(e)
-		}
-		return fmt.Errorf("config validation failed: %s", strings.Join(errs, "; "))
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
 	}
 
 	redisClient, err := iredis.New(ctx, &cfg.Redis)
@@ -66,16 +63,16 @@ func run(ctx context.Context) error {
 	mw.Use(middleware.RateLimitMiddleware(redisClient, &cfg.RateLimit, log))
 	mw.Mount("/", api)
 
-	api.Post("/", h.ReceiverCSPViolation)
+	api.Post("/", h.HandleReport)
 	api.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		Handler:      root,
+		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MiB
+		Handler:           root,
 	}
 
 	errCh := make(chan error, 1)
