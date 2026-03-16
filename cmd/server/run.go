@@ -9,11 +9,11 @@ import (
 
 	"github.com/go-chi/cors"
 
-	"github.com/meysam81/csp-report-collector/internal/config"
-	"github.com/meysam81/csp-report-collector/internal/handler"
-	"github.com/meysam81/csp-report-collector/internal/logger"
-	"github.com/meysam81/csp-report-collector/internal/middleware"
-	iredis "github.com/meysam81/csp-report-collector/internal/redis"
+	"github.com/meysam81/vigil/internal/config"
+	"github.com/meysam81/vigil/internal/handler"
+	"github.com/meysam81/vigil/internal/logger"
+	"github.com/meysam81/vigil/internal/middleware"
+	iredis "github.com/meysam81/vigil/internal/redis"
 	"github.com/meysam81/x/chimux"
 )
 

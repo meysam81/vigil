@@ -8,8 +8,8 @@ import (
 
 	json "github.com/goccy/go-json"
 
-	"github.com/meysam81/csp-report-collector/internal/httperr"
-	"github.com/meysam81/csp-report-collector/internal/model"
+	"github.com/meysam81/vigil/internal/httperr"
+	"github.com/meysam81/vigil/internal/model"
 )
 
 func (h *Handler) ReceiverCSPViolation(w http.ResponseWriter, r *http.Request) {

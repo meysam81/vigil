@@ -3,8 +3,8 @@ package handler
 import (
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/meysam81/csp-report-collector/internal/config"
-	"github.com/meysam81/csp-report-collector/internal/logger"
+	"github.com/meysam81/vigil/internal/config"
+	"github.com/meysam81/vigil/internal/logger"
 )
 
 type Handler struct {

@@ -7,7 +7,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/meysam81/csp-report-collector/internal/config"
+	"github.com/meysam81/vigil/internal/config"
 )
 
 func New(ctx context.Context, cfg *config.RedisConfig) (*goredis.Client, error) {

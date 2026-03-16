@@ -5,7 +5,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/meysam81/csp-report-collector/internal/logger"
+	"github.com/meysam81/vigil/internal/logger"
 )
 
 var log *logger.Logger

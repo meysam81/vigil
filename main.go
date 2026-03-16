@@ -9,8 +9,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/meysam81/csp-report-collector/cmd/server"
-	"github.com/meysam81/csp-report-collector/internal/logger"
+	"github.com/meysam81/vigil/cmd/server"
+	"github.com/meysam81/vigil/internal/logger"
 )
 
 var (
@@ -26,7 +26,7 @@ func main() {
 	}
 
 	cmd := &cli.Command{
-		Name:                  "csp-report-collector",
+		Name:                  "vigil",
 		Usage:                 "Collect and store CSP violation reports.",
 		Version:               version,
 		EnableShellCompletion: true,

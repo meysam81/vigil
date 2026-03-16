@@ -12,9 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/meysam81/csp-report-collector/internal/config"
-	"github.com/meysam81/csp-report-collector/internal/handler"
-	"github.com/meysam81/csp-report-collector/internal/logger"
+	"github.com/meysam81/vigil/internal/config"
+	"github.com/meysam81/vigil/internal/handler"
+	"github.com/meysam81/vigil/internal/logger"
 )
 
 var (

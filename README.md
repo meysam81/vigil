@@ -1,8 +1,8 @@
-# csp-report-collector
+# vigil
 
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io%2Fmeysam81%2Fcsp--report--collector-blue)](https://github.com/meysam81/csp-report-collector/pkgs/container/csp-report-collector)
-[![Go Report Card](https://goreportcard.com/badge/github.com/meysam81/csp-report-collector)](https://goreportcard.com/report/github.com/meysam81/csp-report-collector)
-[![License](https://img.shields.io/github/license/meysam81/csp-report-collector)](LICENSE)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io%2Fmeysam81%2Fvigil-blue)](https://github.com/meysam81/vigil/pkgs/container/vigil)
+[![Go Report Card](https://goreportcard.com/badge/github.com/meysam81/vigil)](https://goreportcard.com/report/github.com/meysam81/vigil)
+[![License](https://img.shields.io/github/license/meysam81/vigil)](LICENSE)
 
 Lightweight service to collect and persist Content Security Policy (CSP) violation reports in Redis for audit and investigation.
 
@@ -30,7 +30,7 @@ Lightweight service to collect and persist Content Security Policy (CSP) violati
 ```bash
 docker run --rm -dp 8080:8080 \
   -e REDIS_HOST=your-redis-host \
-  ghcr.io/meysam81/csp-report-collector
+  ghcr.io/meysam81/vigil
 ```
 
 ## Configure Your CSP Header
@@ -148,7 +148,7 @@ The collector accepts both CSP reporting formats:
 version: "3.8"
 services:
   csp-collector:
-    image: ghcr.io/meysam81/csp-report-collector
+    image: ghcr.io/meysam81/vigil
     ports:
       - "8080:8080"
     environment:
