@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/goccy/go-json"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/meysam81/vigil/internal/config"
+	"github.com/meysam81/vigil/internal/constants"
 	"github.com/meysam81/vigil/internal/logger"
 )
 
@@ -33,11 +35,12 @@ type Reporter struct {
 	redis     *goredis.Client
 	log       *logger.Logger
 	cfg       *config.SlackConfig
+	keyTTL    time.Duration
 	notifiers []Notifier
 }
 
-func New(redis *goredis.Client, log *logger.Logger, cfg *config.SlackConfig, notifiers ...Notifier) *Reporter {
-	return &Reporter{redis: redis, log: log, cfg: cfg, notifiers: notifiers}
+func New(redis *goredis.Client, log *logger.Logger, cfg *config.SlackConfig, keyTTL time.Duration, notifiers ...Notifier) *Reporter {
+	return &Reporter{redis: redis, log: log, cfg: cfg, keyTTL: keyTTL, notifiers: notifiers}
 }
 
 // Start runs the reporting loop until ctx is cancelled. It checks for overdue
@@ -149,6 +152,23 @@ func (r *Reporter) runCycle(ctx context.Context, st *state) {
 		Count:         st.Count + 1,
 	}); sErr != nil {
 		r.log.Error().Err(sErr).Msg("failed saving reporter state")
+	}
+
+	r.pruneTimeline(ctx, now)
+}
+
+// pruneTimeline removes expired entries from the timeline sorted set.
+// Report data keys expire via Redis TTL, but their sorted set members
+// remain as orphans. This prevents unbounded memory growth.
+func (r *Reporter) pruneTimeline(ctx context.Context, now time.Time) {
+	cutoff := now.Add(-r.keyTTL).UnixNano()
+	removed, err := r.redis.ZRemRangeByScore(ctx, constants.TimelineKey, "-inf", strconv.FormatInt(cutoff, 10)).Result()
+	if err != nil {
+		r.log.Error().Err(err).Msg("failed pruning timeline")
+		return
+	}
+	if removed > 0 {
+		r.log.Info().Int64("removed", removed).Msg("pruned expired timeline entries")
 	}
 }
 

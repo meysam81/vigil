@@ -4,20 +4,31 @@ import (
 	"testing"
 )
 
-func TestParseReport_Legacy(t *testing.T) {
-	rpt := &report{
-		Directives: make(map[string]int),
-		Origins:    make(map[string]int),
-		Pages:      make(map[string]int),
-		Browsers:   make(map[string]int),
+func newReport() *report {
+	return &report{
+		Directives:   make(map[string]int),
+		Dispositions: make(map[string]int),
+		Origins:      make(map[string]int),
+		Pages:        make(map[string]int),
+		Browsers:     make(map[string]int),
+		SourceFiles:  make(map[string]int),
 	}
+}
+
+func TestParseReport_Legacy(t *testing.T) {
+	rpt := newReport()
 
 	raw := `{
 		"csp-report": {
 			"blocked-uri": "http://example.com/css/style.css",
+			"disposition": "report",
 			"document-uri": "http://example.com/signup.html",
 			"effective-directive": "style-src-elem",
-			"violated-directive": "style-src-elem"
+			"violated-directive": "style-src-elem",
+			"source-file": "http://example.com/app.js",
+			"line-number": 42,
+			"column-number": 10,
+			"script-sample": "alert('xss')"
 		}
 	}`
 
@@ -29,6 +40,9 @@ func TestParseReport_Legacy(t *testing.T) {
 	if rpt.Directives["style-src-elem"] != 1 {
 		t.Fatalf("directive: want style-src-elem=1, got %v", rpt.Directives)
 	}
+	if rpt.Dispositions["report"] != 1 {
+		t.Fatalf("disposition: want report=1, got %v", rpt.Dispositions)
+	}
 	if rpt.Origins["example.com"] != 1 {
 		t.Fatalf("origin: want example.com=1, got %v", rpt.Origins)
 	}
@@ -38,21 +52,31 @@ func TestParseReport_Legacy(t *testing.T) {
 	if rpt.Browsers["Unknown"] != 1 {
 		t.Fatalf("browser: want Unknown=1, got %v", rpt.Browsers)
 	}
+	if rpt.SourceFiles["http://example.com/app.js"] != 1 {
+		t.Fatalf("sourceFile: want http://example.com/app.js=1, got %v", rpt.SourceFiles)
+	}
+	if len(rpt.Samples) != 1 {
+		t.Fatalf("samples: want 1, got %d", len(rpt.Samples))
+	}
+	s := rpt.Samples[0]
+	if s.Directive != "style-src-elem" || s.Sample != "alert('xss')" || s.Line != 42 || s.Col != 10 {
+		t.Fatalf("sample: got %+v", s)
+	}
 }
 
 func TestParseReport_Modern(t *testing.T) {
-	rpt := &report{
-		Directives: make(map[string]int),
-		Origins:    make(map[string]int),
-		Pages:      make(map[string]int),
-		Browsers:   make(map[string]int),
-	}
+	rpt := newReport()
 
 	raw := `{
 		"body": {
 			"blockedURL": "https://cdn.evil.com/tracker.js",
+			"disposition": "enforce",
 			"documentURL": "https://example.com/app",
-			"effectiveDirective": "script-src-elem"
+			"effectiveDirective": "script-src-elem",
+			"sourceFile": "https://example.com/main.js",
+			"lineNumber": 121,
+			"columnNumber": 39,
+			"sample": "console.log(\"lo\")"
 		},
 		"user_agent": "Mozilla/5.0 Chrome/127.0.0.0 Safari/537.36"
 	}`
@@ -65,11 +89,24 @@ func TestParseReport_Modern(t *testing.T) {
 	if rpt.Directives["script-src-elem"] != 1 {
 		t.Fatalf("directive: want script-src-elem=1, got %v", rpt.Directives)
 	}
+	if rpt.Dispositions["enforce"] != 1 {
+		t.Fatalf("disposition: want enforce=1, got %v", rpt.Dispositions)
+	}
 	if rpt.Origins["cdn.evil.com"] != 1 {
 		t.Fatalf("origin: want cdn.evil.com=1, got %v", rpt.Origins)
 	}
 	if rpt.Browsers["Chrome"] != 1 {
 		t.Fatalf("browser: want Chrome=1, got %v", rpt.Browsers)
+	}
+	if rpt.SourceFiles["https://example.com/main.js"] != 1 {
+		t.Fatalf("sourceFile: want https://example.com/main.js=1, got %v", rpt.SourceFiles)
+	}
+	if len(rpt.Samples) != 1 {
+		t.Fatalf("samples: want 1, got %d", len(rpt.Samples))
+	}
+	s := rpt.Samples[0]
+	if s.Directive != "script-src-elem" || s.Sample != `console.log("lo")` || s.Line != 121 || s.Col != 39 {
+		t.Fatalf("sample: got %+v", s)
 	}
 }
 

@@ -13,7 +13,7 @@ func TestIsOverdue(t *testing.T) {
 	cfg := &config.SlackConfig{
 		ReportInterval: 24 * time.Hour,
 	}
-	r := New(nil, log, cfg)
+	r := New(nil, log, cfg, 720*time.Hour)
 
 	tests := []struct {
 		name string

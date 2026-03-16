@@ -14,15 +14,27 @@ import (
 	"github.com/meysam81/vigil/internal/constants"
 )
 
+// sampleEntry captures a code sample with its source location.
+type sampleEntry struct {
+	Directive  string
+	Sample     string
+	SourceFile string
+	Line       int64
+	Col        int64
+}
+
 // report holds aggregated CSP violation data for a time window.
 type report struct {
-	Total      int
-	Since      time.Time
-	Until      time.Time
-	Directives map[string]int
-	Origins    map[string]int
-	Pages      map[string]int
-	Browsers   map[string]int
+	Total        int
+	Since        time.Time
+	Until        time.Time
+	Directives   map[string]int
+	Dispositions map[string]int
+	Origins      map[string]int
+	Pages        map[string]int
+	Browsers     map[string]int
+	SourceFiles  map[string]int
+	Samples      []sampleEntry
 }
 
 // rankedEntry is a key-count pair used for sorting.
@@ -50,12 +62,14 @@ const mgetBatchSize = 200
 
 func (r *Reporter) aggregate(ctx context.Context, since, now time.Time) (*report, error) {
 	rpt := &report{
-		Since:      since,
-		Until:      now,
-		Directives: make(map[string]int),
-		Origins:    make(map[string]int),
-		Pages:      make(map[string]int),
-		Browsers:   make(map[string]int),
+		Since:        since,
+		Until:        now,
+		Directives:   make(map[string]int),
+		Dispositions: make(map[string]int),
+		Origins:      make(map[string]int),
+		Pages:        make(map[string]int),
+		Browsers:     make(map[string]int),
+		SourceFiles:  make(map[string]int),
 	}
 
 	keys, err := r.redis.ZRangeArgs(ctx, goredis.ZRangeArgs{
@@ -101,9 +115,15 @@ func parseReport(raw string, rpt *report) {
 	}
 }
 
+const maxSamples = 10
+
 func parseLegacy(raw string, rpt *report) {
-	if d := gjson.Get(raw, "csp-report.effective-directive").String(); d != "" {
-		rpt.Directives[d]++
+	directive := gjson.Get(raw, "csp-report.effective-directive").String()
+	if directive != "" {
+		rpt.Directives[directive]++
+	}
+	if d := gjson.Get(raw, "csp-report.disposition").String(); d != "" {
+		rpt.Dispositions[d]++
 	}
 	if b := gjson.Get(raw, "csp-report.blocked-uri").String(); b != "" {
 		rpt.Origins[extractOrigin(b)]++
@@ -111,19 +131,47 @@ func parseLegacy(raw string, rpt *report) {
 	if p := gjson.Get(raw, "csp-report.document-uri").String(); p != "" {
 		rpt.Pages[extractPath(p)]++
 	}
-	// Legacy format has no user_agent field
+	if sf := gjson.Get(raw, "csp-report.source-file").String(); sf != "" {
+		rpt.SourceFiles[sf]++
+	}
+	if sample := gjson.Get(raw, "csp-report.script-sample").String(); sample != "" && len(rpt.Samples) < maxSamples {
+		rpt.Samples = append(rpt.Samples, sampleEntry{
+			Directive:  directive,
+			Sample:     sample,
+			SourceFile: gjson.Get(raw, "csp-report.source-file").String(),
+			Line:       gjson.Get(raw, "csp-report.line-number").Int(),
+			Col:        gjson.Get(raw, "csp-report.column-number").Int(),
+		})
+	}
+	// Legacy format has no user_agent field.
 	rpt.Browsers["Unknown"]++
 }
 
 func parseModern(raw string, rpt *report) {
-	if d := gjson.Get(raw, "body.effectiveDirective").String(); d != "" {
-		rpt.Directives[d]++
+	directive := gjson.Get(raw, "body.effectiveDirective").String()
+	if directive != "" {
+		rpt.Directives[directive]++
+	}
+	if d := gjson.Get(raw, "body.disposition").String(); d != "" {
+		rpt.Dispositions[d]++
 	}
 	if b := gjson.Get(raw, "body.blockedURL").String(); b != "" {
 		rpt.Origins[extractOrigin(b)]++
 	}
 	if p := gjson.Get(raw, "body.documentURL").String(); p != "" {
 		rpt.Pages[extractPath(p)]++
+	}
+	if sf := gjson.Get(raw, "body.sourceFile").String(); sf != "" {
+		rpt.SourceFiles[sf]++
+	}
+	if sample := gjson.Get(raw, "body.sample").String(); sample != "" && len(rpt.Samples) < maxSamples {
+		rpt.Samples = append(rpt.Samples, sampleEntry{
+			Directive:  directive,
+			Sample:     sample,
+			SourceFile: gjson.Get(raw, "body.sourceFile").String(),
+			Line:       gjson.Get(raw, "body.lineNumber").Int(),
+			Col:        gjson.Get(raw, "body.columnNumber").Int(),
+		})
 	}
 	if ua := gjson.Get(raw, "user_agent").String(); ua != "" {
 		rpt.Browsers[browserFamily(ua)]++

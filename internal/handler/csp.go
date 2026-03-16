@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -46,26 +47,54 @@ func (h *Handler) HandleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.log.Info().RawJSON("csp_report", body).Msg("received a csp violation report")
-
 	now := time.Now()
-	key, err := reportKey(now)
+	reports, err := splitReports(body)
 	if err != nil {
-		h.log.Error().Err(err).Msg("failed generating report key")
-		httperr.Internal(w)
+		h.log.Error().Err(err).Msg("failed splitting batched reports")
+		httperr.BadRequest(w, httperr.MsgInvalidBody)
 		return
 	}
 
 	pipe := h.redis.Pipeline()
-	pipe.Set(r.Context(), key, body, h.config.Redis.KeyTTL)
-	pipe.ZAdd(r.Context(), constants.TimelineKey, goredis.Z{Score: float64(now.UnixNano()), Member: key})
+	for _, single := range reports {
+		key, err := reportKey(now)
+		if err != nil {
+			h.log.Error().Err(err).Msg("failed generating report key")
+			httperr.Internal(w)
+			return
+		}
+		pipe.Set(r.Context(), key, []byte(single), h.config.Redis.KeyTTL)
+		pipe.ZAdd(r.Context(), constants.TimelineKey, goredis.Z{Score: float64(now.UnixNano()), Member: key})
+	}
 	if _, err := pipe.Exec(r.Context()); err != nil {
 		h.log.Error().Err(err).Msg("failed saving body to redis")
 		httperr.Internal(w)
 		return
 	}
 
+	h.log.Info().Int("count", len(reports)).Msg("stored csp violation report(s)")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// splitReports handles both single-object and batched array payloads.
+// The Reporting API (W3C) allows browsers to send an array of reports
+// in a single POST. This splits arrays into individual JSON objects.
+func splitReports(body []byte) ([]json.RawMessage, error) {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty body")
+	}
+	if trimmed[0] == '[' {
+		var items []json.RawMessage
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			return nil, fmt.Errorf("unmarshaling report array: %w", err)
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("empty report array")
+		}
+		return items, nil
+	}
+	return []json.RawMessage{trimmed}, nil
 }
 
 func reportKey(now time.Time) (string, error) {

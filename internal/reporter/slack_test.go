@@ -22,6 +22,10 @@ func TestFormatReport(t *testing.T) {
 			"script-src-elem": 30,
 			"style-src-elem":  12,
 		},
+		Dispositions: map[string]int{
+			"enforce": 35,
+			"report":  7,
+		},
 		Origins: map[string]int{
 			"cdn.evil.com": 25,
 			"tracker.io":   17,
@@ -33,6 +37,18 @@ func TestFormatReport(t *testing.T) {
 		Browsers: map[string]int{
 			"Chrome":  30,
 			"Firefox": 12,
+		},
+		SourceFiles: map[string]int{
+			"https://example.com/main.js": 20,
+		},
+		Samples: []sampleEntry{
+			{
+				Directive:  "script-src-elem",
+				Sample:     "alert('xss')",
+				SourceFile: "https://example.com/main.js",
+				Line:       42,
+				Col:        10,
+			},
 		},
 	}
 
@@ -46,6 +62,14 @@ func TestFormatReport(t *testing.T) {
 		"cdn.evil.com",
 		"/app",
 		"Chrome",
+		"*Disposition:*",
+		"enforce",
+		"report",
+		"*Top Source Files:*",
+		"example.com/main.js",
+		"*Recent Samples:*",
+		"alert('xss')",
+		":42:10",
 	}
 	for _, c := range checks {
 		if !strings.Contains(msg, c) {

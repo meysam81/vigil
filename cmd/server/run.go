@@ -91,7 +91,7 @@ func run(ctx context.Context) error {
 	// Reporter (if Slack is configured)
 	if cfg.Slack.WebhookURL != "" {
 		slackNotifier := reporter.NewSlackNotifier(&cfg.Slack, log)
-		rpt := reporter.New(redisClient, log, &cfg.Slack, slackNotifier)
+		rpt := reporter.New(redisClient, log, &cfg.Slack, cfg.Redis.KeyTTL, slackNotifier)
 		g.Go(func() error {
 			return rpt.Start(gctx)
 		})

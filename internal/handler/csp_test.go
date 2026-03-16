@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/meysam81/vigil/internal/config"
@@ -25,9 +28,13 @@ var (
 func TestMain(m *testing.M) {
 	cfg := &config.Config{
 		LogLevel: "error",
+		Server: config.ServerConfig{
+			MaxBodySize: 65536, // 64KB
+		},
 		Redis: config.RedisConfig{
-			Host: "localhost",
-			Port: 6379,
+			Host:   "localhost",
+			Port:   6379,
+			KeyTTL: 720 * time.Hour,
 		},
 	}
 
@@ -130,5 +137,104 @@ func TestMalformedJSON(t *testing.T) {
 
 	if recorder.Result().StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected %d, got %d", http.StatusBadRequest, recorder.Result().StatusCode)
+	}
+}
+
+func TestBatchedReports(t *testing.T) {
+	payload := `[
+  {
+    "age": 10,
+    "body": {
+      "blockedURL": "https://evil.com/tracker.js",
+      "disposition": "enforce",
+      "documentURL": "https://example.com/page1",
+      "effectiveDirective": "script-src-elem"
+    },
+    "type": "csp-violation",
+    "url": "https://example.com/page1"
+  },
+  {
+    "age": 20,
+    "body": {
+      "blockedURL": "https://evil.com/ads.js",
+      "disposition": "report",
+      "documentURL": "https://example.com/page2",
+      "effectiveDirective": "script-src-elem"
+    },
+    "type": "csp-violation",
+    "url": "https://example.com/page2"
+  }
+]`
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/reports+json")
+
+	recorder := httptest.NewRecorder()
+	testRouter.ServeHTTP(recorder, req)
+
+	if recorder.Result().StatusCode != http.StatusNoContent {
+		r, _ := io.ReadAll(recorder.Body)
+		t.Fatalf("expected %d, got %d: %s", http.StatusNoContent, recorder.Result().StatusCode, string(r))
+	}
+}
+
+func TestCORSPreflight(t *testing.T) {
+	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type"},
+		MaxAge:         300,
+	}))
+	r.Post("/", testHandler.HandleReport)
+
+	req := httptest.NewRequest(http.MethodOptions, "/", nil)
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "Content-Type")
+
+	recorder := httptest.NewRecorder()
+	r.ServeHTTP(recorder, req)
+
+	if recorder.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected %d for CORS preflight, got %d", http.StatusOK, recorder.Result().StatusCode)
+	}
+	if acao := recorder.Header().Get("Access-Control-Allow-Origin"); acao != "*" {
+		t.Fatalf("expected Access-Control-Allow-Origin=*, got %q", acao)
+	}
+	if acam := recorder.Header().Get("Access-Control-Allow-Methods"); acam == "" {
+		t.Fatal("expected Access-Control-Allow-Methods header")
+	}
+}
+
+func TestOversizedBody(t *testing.T) {
+	smallCfg := &config.Config{
+		LogLevel: "error",
+		Server: config.ServerConfig{
+			MaxBodySize: 64, // 64 bytes
+		},
+		Redis: config.RedisConfig{
+			Host:   "localhost",
+			Port:   6379,
+			KeyTTL: 720 * time.Hour,
+		},
+	}
+	log := logger.NewLogger("error", true)
+	redisClient := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+
+	h := handler.New(redisClient, log, smallCfg)
+	r := chi.NewRouter()
+	r.Post("/", h.HandleReport)
+
+	// Body larger than 64 bytes.
+	largeBody := strings.Repeat(`{"csp-report":{"blocked-uri":"x"}}`, 10)
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(largeBody))
+	req.Header.Set("Content-Type", "application/csp-report")
+
+	recorder := httptest.NewRecorder()
+	r.ServeHTTP(recorder, req)
+
+	if recorder.Result().StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected %d, got %d", http.StatusRequestEntityTooLarge, recorder.Result().StatusCode)
 	}
 }

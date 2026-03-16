@@ -60,9 +60,28 @@ func Load() (*Config, error) {
 
 func (c *Config) Validate() error {
 	var errs []error
+
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		errs = append(errs, errors.New("PORT must be between 1 and 65535"))
+	}
+	if c.Server.MaxBodySize <= 0 {
+		errs = append(errs, errors.New("MAX_BODY_SIZE must be > 0"))
+	}
+
 	if strings.TrimSpace(c.Redis.Host) == "" {
 		errs = append(errs, errors.New("REDIS_HOST is required"))
 	}
+	if c.Redis.Port < 1 || c.Redis.Port > 65535 {
+		errs = append(errs, errors.New("REDIS_PORT must be between 1 and 65535"))
+	}
+
+	if c.RateLimit.MaxRPS <= 0 {
+		errs = append(errs, errors.New("RATELIMIT_MAX must be > 0"))
+	}
+	if c.RateLimit.RefillRate <= 0 {
+		errs = append(errs, errors.New("RATELIMIT_REFILL must be > 0"))
+	}
+
 	if url := strings.TrimSpace(c.Slack.WebhookURL); url != "" && !strings.HasPrefix(url, "https://") {
 		errs = append(errs, errors.New("SLACK_WEBHOOK_URL must use https://"))
 	}
@@ -75,5 +94,6 @@ func (c *Config) Validate() error {
 	if c.Slack.RetryMinDelay > c.Slack.RetryMaxDelay {
 		errs = append(errs, errors.New("SLACK_RETRY_MIN_DELAY must be <= SLACK_RETRY_MAX_DELAY"))
 	}
+
 	return errors.Join(errs...)
 }

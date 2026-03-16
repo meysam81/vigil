@@ -167,6 +167,42 @@ func formatReport(rpt *report) string {
 		}
 	}
 
+	if len(rpt.Dispositions) > 0 {
+		b.WriteString("\n*Disposition:*\n")
+		for _, e := range topN(rpt.Dispositions, topCount) {
+			fmt.Fprintf(&b, "  • %s — %d\n", escapeMrkdwn(e.Key), e.Count)
+		}
+	}
+
+	if top := topN(rpt.SourceFiles, topCount); len(top) > 0 {
+		b.WriteString("\n*Top Source Files:*\n")
+		for _, e := range top {
+			fmt.Fprintf(&b, "  • `%s` — %d\n", escapeMrkdwn(e.Key), e.Count)
+		}
+	}
+
+	if len(rpt.Samples) > 0 {
+		b.WriteString("\n*Recent Samples:*\n")
+		for _, s := range rpt.Samples {
+			sample := s.Sample
+			if len(sample) > 60 {
+				sample = sample[:60] + "…"
+			}
+			loc := ""
+			if s.SourceFile != "" {
+				loc = fmt.Sprintf(" (%s", escapeMrkdwn(s.SourceFile))
+				if s.Line > 0 {
+					loc += fmt.Sprintf(":%d", s.Line)
+					if s.Col > 0 {
+						loc += fmt.Sprintf(":%d", s.Col)
+					}
+				}
+				loc += ")"
+			}
+			fmt.Fprintf(&b, "  • `%s` `%s`%s\n", escapeMrkdwn(s.Directive), escapeMrkdwn(sample), loc)
+		}
+	}
+
 	return b.String()
 }
 
