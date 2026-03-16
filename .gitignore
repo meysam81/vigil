@@ -31,3 +31,4 @@ go.work
 tmp
 vigil
 .envrc
+.lycheecache

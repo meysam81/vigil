@@ -5,7 +5,11 @@ exclude = [
 exclude_path = [
 ]
 
-accept = []
+accept = [
+  200,
+  403,
+  429
+]
 
 cache = true
 
