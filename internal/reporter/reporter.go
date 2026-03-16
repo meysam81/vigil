@@ -15,6 +15,11 @@ import (
 
 const stateKey = "vigil:reporter:state"
 
+const (
+	statusSuccess = "success"
+	statusFailed  = "failed"
+)
+
 type state struct {
 	LastSuccessAt int64  `json:"last_success_at"`
 	LastAttemptAt int64  `json:"last_attempt_at"`
@@ -23,15 +28,16 @@ type state struct {
 	Count         int    `json:"count"`
 }
 
-// Reporter runs periodic CSP violation aggregate reports and sends them to Slack.
+// Reporter runs periodic CSP violation aggregate reports and sends them via Notifiers.
 type Reporter struct {
-	redis *goredis.Client
-	log   *logger.Logger
-	cfg   *config.SlackConfig
+	redis     *goredis.Client
+	log       *logger.Logger
+	cfg       *config.SlackConfig
+	notifiers []Notifier
 }
 
-func New(redis *goredis.Client, log *logger.Logger, cfg *config.SlackConfig) *Reporter {
-	return &Reporter{redis: redis, log: log, cfg: cfg}
+func New(redis *goredis.Client, log *logger.Logger, cfg *config.SlackConfig, notifiers ...Notifier) *Reporter {
+	return &Reporter{redis: redis, log: log, cfg: cfg, notifiers: notifiers}
 }
 
 // Start runs the reporting loop until ctx is cancelled. It checks for overdue
@@ -71,7 +77,7 @@ func (r *Reporter) isOverdue(st *state) bool {
 	if st.LastSuccessAt == 0 {
 		return true // first run
 	}
-	if st.Status == "failed" {
+	if st.Status == statusFailed {
 		return true // last attempt failed, retry
 	}
 	lastSuccess := time.Unix(st.LastSuccessAt, 0)
@@ -79,54 +85,71 @@ func (r *Reporter) isOverdue(st *state) bool {
 }
 
 func (r *Reporter) runCycle(ctx context.Context, st *state) {
+	now := time.Now()
+
 	since := time.Unix(st.LastSuccessAt, 0)
 	if st.LastSuccessAt == 0 {
-		since = time.Now().Add(-r.cfg.ReportInterval)
+		since = now.Add(-r.cfg.ReportInterval)
 	}
 
-	report, err := r.aggregate(ctx, since)
+	rpt, err := r.aggregate(ctx, since, now)
 	if err != nil {
 		r.log.Error().Err(err).Msg("failed aggregating reports")
-		r.saveState(ctx, &state{
-			LastAttemptAt: time.Now().Unix(),
+		if sErr := r.saveState(ctx, &state{
+			LastAttemptAt: now.Unix(),
 			LastSuccessAt: st.LastSuccessAt,
-			Status:        "failed",
+			Status:        statusFailed,
 			Error:         err.Error(),
 			Count:         st.Count,
-		})
+		}); sErr != nil {
+			r.log.Error().Err(sErr).Msg("failed saving reporter state")
+		}
 		return
 	}
 
-	if report.Total == 0 {
-		r.log.Info().Msg("no violations in reporting window, skipping slack notification")
-		r.saveState(ctx, &state{
-			LastAttemptAt: time.Now().Unix(),
-			LastSuccessAt: time.Now().Unix(),
-			Status:        "success",
+	if rpt.Total == 0 {
+		r.log.Info().Msg("no violations in reporting window, skipping notification")
+		if sErr := r.saveState(ctx, &state{
+			LastAttemptAt: now.Unix(),
+			LastSuccessAt: now.Unix(),
+			Status:        statusSuccess,
 			Count:         st.Count,
-		})
+		}); sErr != nil {
+			r.log.Error().Err(sErr).Msg("failed saving reporter state")
+		}
 		return
 	}
 
-	if err := r.sendSlack(ctx, report); err != nil {
-		r.log.Error().Err(err).Msg("failed sending slack report")
-		r.saveState(ctx, &state{
-			LastAttemptAt: time.Now().Unix(),
+	var sendErrs []error
+	for _, n := range r.notifiers {
+		if err := n.Send(ctx, rpt); err != nil {
+			r.log.Error().Err(err).Str("notifier", n.Name()).Msg("notifier failed")
+			sendErrs = append(sendErrs, fmt.Errorf("%s: %w", n.Name(), err))
+		}
+	}
+
+	if err := errors.Join(sendErrs...); err != nil {
+		if sErr := r.saveState(ctx, &state{
+			LastAttemptAt: now.Unix(),
 			LastSuccessAt: st.LastSuccessAt,
-			Status:        "failed",
+			Status:        statusFailed,
 			Error:         err.Error(),
 			Count:         st.Count,
-		})
+		}); sErr != nil {
+			r.log.Error().Err(sErr).Msg("failed saving reporter state")
+		}
 		return
 	}
 
-	r.log.Info().Int("violations", report.Total).Msg("slack report sent successfully")
-	r.saveState(ctx, &state{
-		LastAttemptAt: time.Now().Unix(),
-		LastSuccessAt: time.Now().Unix(),
-		Status:        "success",
+	r.log.Info().Int("violations", rpt.Total).Msg("report sent successfully")
+	if sErr := r.saveState(ctx, &state{
+		LastAttemptAt: now.Unix(),
+		LastSuccessAt: now.Unix(),
+		Status:        statusSuccess,
 		Count:         st.Count + 1,
-	})
+	}); sErr != nil {
+		r.log.Error().Err(sErr).Msg("failed saving reporter state")
+	}
 }
 
 func (r *Reporter) loadState(ctx context.Context) (*state, error) {
@@ -145,13 +168,13 @@ func (r *Reporter) loadState(ctx context.Context) (*state, error) {
 	return &st, nil
 }
 
-func (r *Reporter) saveState(ctx context.Context, st *state) {
+func (r *Reporter) saveState(ctx context.Context, st *state) error {
 	data, err := json.Marshal(st)
 	if err != nil {
-		r.log.Error().Err(err).Msg("failed marshaling reporter state")
-		return
+		return fmt.Errorf("marshaling reporter state: %w", err)
 	}
 	if err := r.redis.Set(ctx, stateKey, data, 0).Err(); err != nil {
-		r.log.Error().Err(err).Msg("failed saving reporter state")
+		return fmt.Errorf("saving reporter state: %w", err)
 	}
+	return nil
 }

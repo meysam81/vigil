@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/meysam81/vigil/internal/constants"
 	"github.com/meysam81/vigil/internal/httperr"
 )
 
@@ -46,14 +48,18 @@ func (h *Handler) HandleReport(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info().RawJSON("csp_report", body).Msg("received a csp violation report")
 
-	key, err := reportKey()
+	now := time.Now()
+	key, err := reportKey(now)
 	if err != nil {
 		h.log.Error().Err(err).Msg("failed generating report key")
 		httperr.Internal(w)
 		return
 	}
 
-	if _, err := h.redis.Set(r.Context(), key, body, h.config.Redis.KeyTTL).Result(); err != nil {
+	pipe := h.redis.Pipeline()
+	pipe.Set(r.Context(), key, body, h.config.Redis.KeyTTL)
+	pipe.ZAdd(r.Context(), constants.TimelineKey, goredis.Z{Score: float64(now.UnixNano()), Member: key})
+	if _, err := pipe.Exec(r.Context()); err != nil {
 		h.log.Error().Err(err).Msg("failed saving body to redis")
 		httperr.Internal(w)
 		return
@@ -62,10 +68,10 @@ func (h *Handler) HandleReport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func reportKey() (string, error) {
+func reportKey(now time.Time) (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generating random bytes: %w", err)
 	}
-	return fmt.Sprintf("csp:%d:%s", time.Now().UnixNano(), hex.EncodeToString(b[:])), nil
+	return fmt.Sprintf("csp:%d:%s", now.UnixNano(), hex.EncodeToString(b[:])), nil
 }

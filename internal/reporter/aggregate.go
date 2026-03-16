@@ -2,17 +2,20 @@ package reporter
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/tidwall/gjson"
+
+	"github.com/meysam81/vigil/internal/constants"
 )
 
-// Report holds aggregated CSP violation data for a time window.
-type Report struct {
+// report holds aggregated CSP violation data for a time window.
+type report struct {
 	Total      int
 	Since      time.Time
 	Until      time.Time
@@ -22,17 +25,17 @@ type Report struct {
 	Browsers   map[string]int
 }
 
-// RankedEntry is a key-count pair used for sorting.
-type RankedEntry struct {
+// rankedEntry is a key-count pair used for sorting.
+type rankedEntry struct {
 	Key   string
 	Count int
 }
 
-// TopN returns the top n entries from a count map, sorted descending.
-func TopN(m map[string]int, n int) []RankedEntry {
-	entries := make([]RankedEntry, 0, len(m))
+// topN returns the top n entries from a count map, sorted descending.
+func topN(m map[string]int, n int) []rankedEntry {
+	entries := make([]rankedEntry, 0, len(m))
 	for k, v := range m {
-		entries = append(entries, RankedEntry{Key: k, Count: v})
+		entries = append(entries, rankedEntry{Key: k, Count: v})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Count > entries[j].Count
@@ -43,13 +46,10 @@ func TopN(m map[string]int, n int) []RankedEntry {
 	return entries
 }
 
-const scanBatchSize = 200
+const mgetBatchSize = 200
 
-func (r *Reporter) aggregate(ctx context.Context, since time.Time) (*Report, error) {
-	sinceNano := since.UnixNano()
-	now := time.Now()
-
-	report := &Report{
+func (r *Reporter) aggregate(ctx context.Context, since, now time.Time) (*report, error) {
+	rpt := &report{
 		Since:      since,
 		Until:      now,
 		Directives: make(map[string]int),
@@ -58,96 +58,88 @@ func (r *Reporter) aggregate(ctx context.Context, since time.Time) (*Report, err
 		Browsers:   make(map[string]int),
 	}
 
-	var cursor uint64
-	for {
-		keys, nextCursor, err := r.redis.Scan(ctx, cursor, "csp:*", scanBatchSize).Result()
+	keys, err := r.redis.ZRangeArgs(ctx, goredis.ZRangeArgs{
+		Key:     constants.TimelineKey,
+		Start:   fmt.Sprintf("%d", since.UnixNano()),
+		Stop:    fmt.Sprintf("%d", now.UnixNano()),
+		ByScore: true,
+	}).Result()
+	if err != nil {
+		return nil, fmt.Errorf("querying timeline index: %w", err)
+	}
+
+	// Batch MGET in chunks to avoid oversized commands
+	for i := 0; i < len(keys); i += mgetBatchSize {
+		end := min(i+mgetBatchSize, len(keys))
+		chunk := keys[i:end]
+
+		vals, err := r.redis.MGet(ctx, chunk...).Result()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("fetching report batch: %w", err)
 		}
 
-		// Filter keys by timestamp embedded in key name (csp:<nanos>:<rand>)
-		var filtered []string
-		for _, key := range keys {
-			parts := strings.SplitN(key, ":", 3)
-			if len(parts) < 2 {
+		for _, val := range vals {
+			s, ok := val.(string)
+			if !ok || s == "" {
 				continue
 			}
-			nanos, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				continue
-			}
-			if nanos > sinceNano {
-				filtered = append(filtered, key)
-			}
-		}
-
-		if len(filtered) > 0 {
-			vals, err := r.redis.MGet(ctx, filtered...).Result()
-			if err != nil {
-				return nil, err
-			}
-
-			for _, val := range vals {
-				s, ok := val.(string)
-				if !ok || s == "" {
-					continue
-				}
-				r.parseReport(s, report)
-			}
-		}
-
-		cursor = nextCursor
-		if cursor == 0 {
-			break
+			parseReport(s, rpt)
 		}
 	}
 
-	return report, nil
+	return rpt, nil
 }
 
-func (r *Reporter) parseReport(raw string, report *Report) {
-	report.Total++
+func parseReport(raw string, rpt *report) {
+	rpt.Total++
 
 	// Detect format: legacy has "csp-report" top-level key
 	if gjson.Get(raw, "csp-report").Exists() {
-		r.parseLegacy(raw, report)
+		parseLegacy(raw, rpt)
 	} else {
-		r.parseModern(raw, report)
+		parseModern(raw, rpt)
 	}
 }
 
-func (r *Reporter) parseLegacy(raw string, report *Report) {
+func parseLegacy(raw string, rpt *report) {
 	if d := gjson.Get(raw, "csp-report.effective-directive").String(); d != "" {
-		report.Directives[d]++
+		rpt.Directives[d]++
 	}
 	if b := gjson.Get(raw, "csp-report.blocked-uri").String(); b != "" {
-		report.Origins[extractOrigin(b)]++
+		rpt.Origins[extractOrigin(b)]++
 	}
 	if p := gjson.Get(raw, "csp-report.document-uri").String(); p != "" {
-		report.Pages[extractPath(p)]++
+		rpt.Pages[extractPath(p)]++
 	}
 	// Legacy format has no user_agent field
-	report.Browsers["Unknown"]++
+	rpt.Browsers["Unknown"]++
 }
 
-func (r *Reporter) parseModern(raw string, report *Report) {
+func parseModern(raw string, rpt *report) {
 	if d := gjson.Get(raw, "body.effectiveDirective").String(); d != "" {
-		report.Directives[d]++
+		rpt.Directives[d]++
 	}
 	if b := gjson.Get(raw, "body.blockedURL").String(); b != "" {
-		report.Origins[extractOrigin(b)]++
+		rpt.Origins[extractOrigin(b)]++
 	}
 	if p := gjson.Get(raw, "body.documentURL").String(); p != "" {
-		report.Pages[extractPath(p)]++
+		rpt.Pages[extractPath(p)]++
 	}
 	if ua := gjson.Get(raw, "user_agent").String(); ua != "" {
-		report.Browsers[browserFamily(ua)]++
+		rpt.Browsers[browserFamily(ua)]++
 	} else {
-		report.Browsers["Unknown"]++
+		rpt.Browsers["Unknown"]++
 	}
 }
 
 func extractOrigin(rawURL string) string {
+	// Handle data: and blob: URI schemes
+	if strings.HasPrefix(rawURL, "data:") {
+		return "data:"
+	}
+	if strings.HasPrefix(rawURL, "blob:") {
+		return "blob:"
+	}
 	// Handle special CSP values like "inline", "eval", "self"
 	if !strings.Contains(rawURL, "://") {
 		return rawURL
@@ -171,6 +163,10 @@ func extractPath(rawURL string) string {
 	return p
 }
 
+// browserFamily extracts a coarse browser name from a User-Agent string.
+// This is an intentional approximation: UA strings are unreliable and
+// spoofable, so a rough bucket (Chrome/Firefox/Safari/Edge/Opera/Other)
+// is sufficient for aggregate reporting.
 func browserFamily(ua string) string {
 	switch {
 	case strings.Contains(ua, "Edg"):

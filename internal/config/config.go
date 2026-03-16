@@ -35,7 +35,10 @@ type CORSConfig struct {
 
 type SlackConfig struct {
 	WebhookURL     string        `env:"SLACK_WEBHOOK_URL"`
-	ReportInterval time.Duration `env:"REPORT_INTERVAL" envDefault:"24h"`
+	ReportInterval time.Duration `env:"REPORT_INTERVAL"       envDefault:"24h"`
+	MaxRetries     int           `env:"SLACK_MAX_RETRIES"     envDefault:"5"`
+	RetryMinDelay  time.Duration `env:"SLACK_RETRY_MIN_DELAY" envDefault:"3s"`
+	RetryMaxDelay  time.Duration `env:"SLACK_RETRY_MAX_DELAY" envDefault:"20s"`
 }
 
 type Config struct {
@@ -62,6 +65,15 @@ func (c *Config) Validate() error {
 	}
 	if url := strings.TrimSpace(c.Slack.WebhookURL); url != "" && !strings.HasPrefix(url, "https://") {
 		errs = append(errs, errors.New("SLACK_WEBHOOK_URL must use https://"))
+	}
+	if c.Slack.ReportInterval < time.Minute {
+		errs = append(errs, errors.New("REPORT_INTERVAL must be at least 1m"))
+	}
+	if c.Slack.MaxRetries < 0 {
+		errs = append(errs, errors.New("SLACK_MAX_RETRIES must be >= 0"))
+	}
+	if c.Slack.RetryMinDelay > c.Slack.RetryMaxDelay {
+		errs = append(errs, errors.New("SLACK_RETRY_MIN_DELAY must be <= SLACK_RETRY_MAX_DELAY"))
 	}
 	return errors.Join(errs...)
 }

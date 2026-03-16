@@ -9,6 +9,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/meysam81/vigil/cmd/migrate"
 	"github.com/meysam81/vigil/cmd/server"
 	"github.com/meysam81/vigil/internal/logger"
 )
@@ -34,6 +35,7 @@ func main() {
 		DefaultCommand:        "server",
 		Commands: []*cli.Command{
 			server.Command(),
+			migrate.Command(),
 			{
 				Name:    "version",
 				Aliases: []string{"v"},

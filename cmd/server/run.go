@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/go-chi/cors"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/meysam81/vigil/internal/config"
 	"github.com/meysam81/vigil/internal/handler"
 	"github.com/meysam81/vigil/internal/logger"
 	"github.com/meysam81/vigil/internal/middleware"
+	"github.com/meysam81/vigil/internal/migration"
 	iredis "github.com/meysam81/vigil/internal/redis"
 	"github.com/meysam81/vigil/internal/reporter"
 	"github.com/meysam81/x/chimux"
@@ -34,11 +36,10 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connecting to redis: %w", err)
 	}
-	defer func() {
-		if err := redisClient.Close(); err != nil {
-			log.Error().Err(err).Msg("failed closing redis connection")
-		}
-	}()
+
+	if err := migration.Run(ctx, redisClient, log); err != nil {
+		return fmt.Errorf("migration failed: %w", err)
+	}
 
 	h := handler.New(redisClient, log, cfg)
 
@@ -76,38 +77,46 @@ func run(ctx context.Context) error {
 		Handler:           root,
 	}
 
-	if cfg.Slack.WebhookURL != "" {
-		rpt := reporter.New(redisClient, log, &cfg.Slack)
-		go func() {
-			if err := rpt.Start(ctx); err != nil {
-				log.Error().Err(err).Msg("reporter stopped with error")
-			}
-		}()
-	}
+	g, gctx := errgroup.WithContext(ctx)
 
-	errCh := make(chan error, 1)
-	go func() {
+	// HTTP server
+	g.Go(func() error {
 		log.Info().Msgf("listening on address %s", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("server error: %w", err)
+			return fmt.Errorf("server error: %w", err)
 		}
-		close(errCh)
-	}()
+		return nil
+	})
 
-	<-ctx.Done()
-	log.Info().Msg("shutdown signal received, draining connections")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server shutdown: %w", err)
+	// Reporter (if Slack is configured)
+	if cfg.Slack.WebhookURL != "" {
+		slackNotifier := reporter.NewSlackNotifier(&cfg.Slack, log)
+		rpt := reporter.New(redisClient, log, &cfg.Slack, slackNotifier)
+		g.Go(func() error {
+			return rpt.Start(gctx)
+		})
 	}
 
-	if err := <-errCh; err != nil {
-		return err
+	// Shutdown watcher
+	g.Go(func() error {
+		<-gctx.Done()
+		log.Info().Msg("shutdown signal received, draining connections")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("server shutdown: %w", err)
+		}
+		return nil
+	})
+
+	err = g.Wait()
+
+	if closeErr := redisClient.Close(); closeErr != nil {
+		log.Error().Err(closeErr).Msg("failed closing redis connection")
 	}
 
 	log.Info().Msg("shutdown complete")
-	return nil
+	return err
 }
