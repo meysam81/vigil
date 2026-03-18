@@ -1,4 +1,4 @@
-FROM golang:1.25 AS mod
+FROM golang:1.26 AS mod
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ RUN --mount=type=bind,source=go.mod,target=go.mod \
     go mod download
 
 
-FROM golang:1.25 AS builder
+FROM golang:1.26 AS builder
 
 ARG VERSION=dev
 ARG COMMIT=none
