@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/meysam81/vigil/compare/v0.1.0...v0.2.0) (2026-03-18)
+
+
+### Features
+
+* add migration for old CSP reports ([7a2f27a](https://github.com/meysam81/vigil/commit/7a2f27a6f81c2f30a1bb8760c90112518ef58310))
+* add slack daily aggregated reports ([68f15fd](https://github.com/meysam81/vigil/commit/68f15fda756ccccb937579516575113c5a4fafbe))
+* add structured and contextual logging throughout the app ([afc8b35](https://github.com/meysam81/vigil/commit/afc8b35f86609f61133afa59838eeab58d17831c))
+* add support for bacth CSP reports ([91e884c](https://github.com/meysam81/vigil/commit/91e884c9049036424353f285f788f184fcd3e9f7))
+
+
+### Bug Fixes
+
+* **CI:** add internal to dockerignore ([df869e9](https://github.com/meysam81/vigil/commit/df869e9b817f3768201a23edc5df226d03578e5d))
+* **CI:** make link-checker happy ([3ea34f8](https://github.com/meysam81/vigil/commit/3ea34f814e461eae76e2c2b2c5f13fe2ce4a89da))
+* **CI:** update outdated jobs ([a33a217](https://github.com/meysam81/vigil/commit/a33a21799a966f3eb0e23db978f6a75d96d7eca7))
+* polish up and add request max bytes reader ([04086fa](https://github.com/meysam81/vigil/commit/04086fa74a3fb960a95be55e876f9b1ca87ea01d))
+* rename the project to single-word ([ffdb1fd](https://github.com/meysam81/vigil/commit/ffdb1fdf15110d3aa622016f446619c5d31b560b))
+
 ## 0.1.0 (2025-08-25)
 
 
