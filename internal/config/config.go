@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -34,11 +35,12 @@ type CORSConfig struct {
 }
 
 type SlackConfig struct {
-	WebhookURL     string        `env:"SLACK_WEBHOOK_URL"`
-	ReportInterval time.Duration `env:"REPORT_INTERVAL"       envDefault:"24h"`
-	MaxRetries     int           `env:"SLACK_MAX_RETRIES"     envDefault:"5"`
-	RetryMinDelay  time.Duration `env:"SLACK_RETRY_MIN_DELAY" envDefault:"3s"`
-	RetryMaxDelay  time.Duration `env:"SLACK_RETRY_MAX_DELAY" envDefault:"20s"`
+	WebhookURL         string        `env:"SLACK_WEBHOOK_URL"`
+	ReportScheduleHour int           `env:"REPORT_SCHEDULE_HOUR"  envDefault:"10"`
+	ReportScheduleMin  int           `env:"REPORT_SCHEDULE_MINUTE" envDefault:"0"`
+	MaxRetries         int           `env:"SLACK_MAX_RETRIES"     envDefault:"5"`
+	RetryMinDelay      time.Duration `env:"SLACK_RETRY_MIN_DELAY" envDefault:"3s"`
+	RetryMaxDelay      time.Duration `env:"SLACK_RETRY_MAX_DELAY" envDefault:"20s"`
 }
 
 type Config struct {
@@ -85,8 +87,11 @@ func (c *Config) Validate() error {
 	if url := strings.TrimSpace(c.Slack.WebhookURL); url != "" && !strings.HasPrefix(url, "https://") {
 		errs = append(errs, errors.New("SLACK_WEBHOOK_URL must use https://"))
 	}
-	if c.Slack.ReportInterval < time.Minute {
-		errs = append(errs, errors.New("REPORT_INTERVAL must be at least 1m"))
+	if c.Slack.ReportScheduleHour < 0 || c.Slack.ReportScheduleHour > 23 {
+		errs = append(errs, errors.New("REPORT_SCHEDULE_HOUR must be between 0 and 23"))
+	}
+	if c.Slack.ReportScheduleMin < 0 || c.Slack.ReportScheduleMin > 59 {
+		errs = append(errs, errors.New("REPORT_SCHEDULE_MINUTE must be between 0 and 59"))
 	}
 	if c.Slack.MaxRetries < 0 {
 		errs = append(errs, errors.New("SLACK_MAX_RETRIES must be >= 0"))
@@ -96,4 +101,13 @@ func (c *Config) Validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// Deprecations returns warnings for deprecated env vars that are still set.
+func (c *Config) Deprecations() []string {
+	var warnings []string
+	if os.Getenv("REPORT_INTERVAL") != "" {
+		warnings = append(warnings, "REPORT_INTERVAL is deprecated; use REPORT_SCHEDULE_HOUR and REPORT_SCHEDULE_MINUTE instead")
+	}
+	return warnings
 }

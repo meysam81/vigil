@@ -13,25 +13,77 @@ func validBase() *Config {
 		Redis:     RedisConfig{Host: "localhost", Port: 6379},
 		RateLimit: RateLimitConfig{MaxRPS: 20, RefillRate: 2.0},
 		Slack: SlackConfig{
-			WebhookURL:     "https://hooks.slack.com/test",
-			ReportInterval: 24 * time.Hour,
-			MaxRetries:     5,
-			RetryMinDelay:  3 * time.Second,
-			RetryMaxDelay:  20 * time.Second,
+			WebhookURL:         "https://hooks.slack.com/test",
+			ReportScheduleHour: 10,
+			ReportScheduleMin:  0,
+			MaxRetries:         5,
+			RetryMinDelay:      3 * time.Second,
+			RetryMaxDelay:      20 * time.Second,
 		},
 	}
 }
 
-func TestValidate_MinReportInterval(t *testing.T) {
-	cfg := validBase()
-	cfg.Slack.ReportInterval = 30 * time.Second
-
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("expected error for ReportInterval < 1m")
+func TestValidate_ScheduleHourBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hour int
+	}{
+		{"negative", -1},
+		{"too high", 24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validBase()
+			cfg.Slack.ReportScheduleHour = tc.hour
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected error for ReportScheduleHour=%d", tc.hour)
+			}
+			if !strings.Contains(err.Error(), "REPORT_SCHEDULE_HOUR") {
+				t.Errorf("error should mention REPORT_SCHEDULE_HOUR, got: %v", err)
+			}
+		})
 	}
-	if !strings.Contains(err.Error(), "REPORT_INTERVAL") {
-		t.Errorf("error should mention REPORT_INTERVAL, got: %v", err)
+}
+
+func TestValidate_ScheduleMinuteBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		minute int
+	}{
+		{"negative", -1},
+		{"too high", 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validBase()
+			cfg.Slack.ReportScheduleMin = tc.minute
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected error for ReportScheduleMin=%d", tc.minute)
+			}
+			if !strings.Contains(err.Error(), "REPORT_SCHEDULE_MINUTE") {
+				t.Errorf("error should mention REPORT_SCHEDULE_MINUTE, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestDeprecations_ReportInterval(t *testing.T) {
+	t.Setenv("REPORT_INTERVAL", "24h")
+	cfg := validBase()
+	warnings := cfg.Deprecations()
+	if len(warnings) == 0 {
+		t.Fatal("expected deprecation warning for REPORT_INTERVAL")
+	}
+	if !strings.Contains(warnings[0], "REPORT_INTERVAL") {
+		t.Errorf("warning should mention REPORT_INTERVAL, got: %s", warnings[0])
+	}
+}
+
+func TestDeprecations_NoWarnings(t *testing.T) {
+	cfg := validBase()
+	warnings := cfg.Deprecations()
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got: %v", warnings)
 	}
 }
 

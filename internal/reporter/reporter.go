@@ -37,38 +37,48 @@ type Reporter struct {
 	cfg       *config.SlackConfig
 	keyTTL    time.Duration
 	notifiers []Notifier
+	nowFunc   func() time.Time
 }
 
 func New(redis *goredis.Client, log *logger.Logger, cfg *config.SlackConfig, keyTTL time.Duration, notifiers ...Notifier) *Reporter {
-	return &Reporter{redis: redis, log: log, cfg: cfg, keyTTL: keyTTL, notifiers: notifiers}
+	return &Reporter{redis: redis, log: log, cfg: cfg, keyTTL: keyTTL, notifiers: notifiers, nowFunc: time.Now}
 }
 
-// Start runs the reporting loop until ctx is cancelled. It checks for overdue
-// reports on startup (crash recovery) and then ticks at the configured interval.
+func (r *Reporter) now() time.Time { return r.nowFunc() }
+
+// nextFireTime computes the next UTC time at the given hour:minute.
+// If today's scheduled time has already passed (or is exactly now), it returns tomorrow's.
+func nextFireTime(now time.Time, hour, minute int) time.Time {
+	t := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+	if t.After(now) {
+		return t
+	}
+	return t.AddDate(0, 0, 1)
+}
+
+// Start runs the reporting loop until ctx is cancelled.
+// Reports fire daily at the configured UTC hour:minute.
 func (r *Reporter) Start(ctx context.Context) error {
-	st, err := r.loadState(ctx)
-	if err != nil {
-		r.log.Warn().Err(err).Msg("failed loading reporter state, treating as first run")
-		st = &state{}
-	}
-
-	r.log.Info().Dur("interval", r.cfg.ReportInterval).Msg("reporter started")
-
-	if r.isOverdue(st) {
-		r.log.Info().Msg("reporter overdue, sending immediate report")
-		r.runCycle(ctx, st)
-	}
-
-	ticker := time.NewTicker(r.cfg.ReportInterval)
-	defer ticker.Stop()
+	r.log.Info().
+		Int("schedule_hour", r.cfg.ReportScheduleHour).
+		Int("schedule_minute", r.cfg.ReportScheduleMin).
+		Msg("reporter started")
 
 	for {
+		now := r.now()
+		next := nextFireTime(now, r.cfg.ReportScheduleHour, r.cfg.ReportScheduleMin)
+		delay := next.Sub(now)
+
+		r.log.Info().Time("next_fire", next).Dur("delay", delay).Msg("waiting for next report")
+
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			r.log.Info().Msg("reporter shutting down")
 			return nil
-		case <-ticker.C:
-			st, err = r.loadState(ctx)
+		case <-timer.C:
+			st, err := r.loadState(ctx)
 			if err != nil {
 				r.log.Error().Err(err).Msg("failed loading reporter state")
 				continue
@@ -78,23 +88,12 @@ func (r *Reporter) Start(ctx context.Context) error {
 	}
 }
 
-func (r *Reporter) isOverdue(st *state) bool {
-	if st.LastSuccessAt == 0 {
-		return true // first run
-	}
-	if st.Status == statusFailed {
-		return true // last attempt failed, retry
-	}
-	lastSuccess := time.Unix(st.LastSuccessAt, 0)
-	return time.Since(lastSuccess) > r.cfg.ReportInterval
-}
-
 func (r *Reporter) runCycle(ctx context.Context, st *state) {
-	now := time.Now()
+	now := r.now()
 
 	since := time.Unix(st.LastSuccessAt, 0)
 	if st.LastSuccessAt == 0 {
-		since = now.Add(-r.cfg.ReportInterval)
+		since = now.Add(-24 * time.Hour)
 	}
 
 	r.log.Debug().Time("since", since).Time("until", now).Msg("reporter cycle starting")

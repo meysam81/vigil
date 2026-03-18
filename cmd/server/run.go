@@ -34,6 +34,10 @@ func run(ctx context.Context) error {
 
 	log.Info().Msg("configuration loaded and validated")
 
+	for _, w := range cfg.Deprecations() {
+		log.Warn().Msg(w)
+	}
+
 	redisClient, err := iredis.New(ctx, &cfg.Redis, log)
 	if err != nil {
 		return fmt.Errorf("connecting to redis: %w", err)

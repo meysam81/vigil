@@ -3,59 +3,77 @@ package reporter
 import (
 	"testing"
 	"time"
-
-	"github.com/meysam81/vigil/internal/config"
-	"github.com/meysam81/vigil/internal/logger"
 )
 
-func TestIsOverdue(t *testing.T) {
-	log := logger.NewLogger("error", true)
-	cfg := &config.SlackConfig{
-		ReportInterval: 24 * time.Hour,
-	}
-	r := New(nil, log, cfg, 720*time.Hour)
-
+func TestNextFireTime(t *testing.T) {
 	tests := []struct {
-		name string
-		st   *state
-		want bool
+		name   string
+		now    time.Time
+		hour   int
+		minute int
+		want   time.Time
 	}{
 		{
-			"first run (zero timestamp)",
-			&state{LastSuccessAt: 0},
-			true,
+			"before schedule today",
+			time.Date(2025, 1, 15, 8, 0, 0, 0, time.UTC),
+			10, 0,
+			time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
 		},
 		{
-			"last attempt failed",
-			&state{
-				LastSuccessAt: time.Now().Add(-1 * time.Hour).Unix(),
-				Status:        statusFailed,
-			},
-			true,
+			"after schedule today rolls to tomorrow",
+			time.Date(2025, 1, 15, 14, 30, 0, 0, time.UTC),
+			10, 0,
+			time.Date(2025, 1, 16, 10, 0, 0, 0, time.UTC),
 		},
 		{
-			"stale (> interval)",
-			&state{
-				LastSuccessAt: time.Now().Add(-25 * time.Hour).Unix(),
-				Status:        statusSuccess,
-			},
-			true,
+			"exactly at schedule rolls to tomorrow",
+			time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
+			10, 0,
+			time.Date(2025, 1, 16, 10, 0, 0, 0, time.UTC),
 		},
 		{
-			"recent success (< interval)",
-			&state{
-				LastSuccessAt: time.Now().Add(-1 * time.Hour).Unix(),
-				Status:        statusSuccess,
-			},
-			false,
+			"one second before schedule",
+			time.Date(2025, 1, 15, 9, 59, 59, 0, time.UTC),
+			10, 0,
+			time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			"midnight schedule",
+			time.Date(2025, 1, 15, 23, 30, 0, 0, time.UTC),
+			0, 0,
+			time.Date(2025, 1, 16, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			"month boundary rollover",
+			time.Date(2025, 1, 31, 14, 0, 0, 0, time.UTC),
+			10, 0,
+			time.Date(2025, 2, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			"year boundary rollover",
+			time.Date(2025, 12, 31, 14, 0, 0, 0, time.UTC),
+			10, 0,
+			time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			"custom minute before",
+			time.Date(2025, 6, 1, 10, 29, 0, 0, time.UTC),
+			10, 30,
+			time.Date(2025, 6, 1, 10, 30, 0, 0, time.UTC),
+		},
+		{
+			"custom minute just past",
+			time.Date(2025, 6, 1, 10, 31, 0, 0, time.UTC),
+			10, 30,
+			time.Date(2025, 6, 2, 10, 30, 0, 0, time.UTC),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.isOverdue(tt.st)
-			if got != tt.want {
-				t.Errorf("isOverdue(%+v) = %v, want %v", tt.st, got, tt.want)
+			got := nextFireTime(tt.now, tt.hour, tt.minute)
+			if !got.Equal(tt.want) {
+				t.Errorf("nextFireTime(%v, %d, %d) = %v, want %v", tt.now, tt.hour, tt.minute, got, tt.want)
 			}
 		})
 	}

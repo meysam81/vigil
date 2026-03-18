@@ -20,7 +20,7 @@ import (
 
 const (
 	topCount   = 5
-	timeFormat = time.RFC1123
+	timeFormat = time.RFC3339
 )
 
 type slackPayload struct {
