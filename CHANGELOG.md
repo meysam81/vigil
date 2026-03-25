@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/meysam81/vigil/compare/v0.2.0...v0.3.0) (2026-03-25)
+
+
+### Features
+
+* add discord to reporter output ([6d14d0b](https://github.com/meysam81/vigil/commit/6d14d0ba97d36ae66abc3aa21524ceaea8666117))
+* add sample subcommand and report on daily 10AM UTC ([7717af1](https://github.com/meysam81/vigil/commit/7717af1d615a53808a573bcf7486e10861d63f24))
+
 ## [0.2.0](https://github.com/meysam81/vigil/compare/v0.1.0...v0.2.0) (2026-03-18)
 
 
