@@ -96,10 +96,20 @@ func run(ctx context.Context) error {
 		return nil
 	})
 
-	// Reporter (if Slack is configured)
-	if cfg.Slack.WebhookURL != "" {
-		slackNotifier := reporter.NewSlackNotifier(&cfg.Slack, log)
-		rpt := reporter.New(redisClient, log, &cfg.Slack, cfg.Redis.KeyTTL, slackNotifier)
+	// Reporter (if any notifier is configured)
+	var notifiers []reporter.Notifier
+	if cfg.Slack.WebhookURL != "" || cfg.Discord.WebhookURL != "" {
+		ws := reporter.NewWebhookSender(log, &cfg.Reporter)
+
+		if cfg.Slack.WebhookURL != "" {
+			notifiers = append(notifiers, reporter.NewSlackNotifier(cfg.Slack.WebhookURL, ws))
+		}
+		if cfg.Discord.WebhookURL != "" {
+			notifiers = append(notifiers, reporter.NewDiscordNotifier(cfg.Discord.WebhookURL, ws))
+		}
+	}
+	if len(notifiers) > 0 {
+		rpt := reporter.New(redisClient, log, &cfg.Reporter, cfg.Redis.KeyTTL, notifiers...)
 		g.Go(func() error {
 			return rpt.Start(gctx)
 		})

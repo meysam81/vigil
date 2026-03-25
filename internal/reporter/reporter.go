@@ -2,9 +2,9 @@ package reporter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -23,24 +23,25 @@ const (
 )
 
 type state struct {
-	LastSuccessAt int64  `json:"last_success_at"`
-	LastAttemptAt int64  `json:"last_attempt_at"`
-	Status        string `json:"status"`
-	Error         string `json:"error,omitempty"`
-	Count         int    `json:"count"`
+	LastSuccessAt int64    `json:"last_success_at"`
+	LastAttemptAt int64    `json:"last_attempt_at"`
+	Status        string   `json:"status"`
+	Error         string   `json:"error,omitempty"`
+	Count         int      `json:"count"`
+	Pending       []string `json:"pending,omitempty"`
 }
 
 // Reporter runs periodic CSP violation aggregate reports and sends them via Notifiers.
 type Reporter struct {
 	redis     *goredis.Client
 	log       *logger.Logger
-	cfg       *config.SlackConfig
+	cfg       *config.ReporterConfig
 	keyTTL    time.Duration
 	notifiers []Notifier
 	nowFunc   func() time.Time
 }
 
-func New(redis *goredis.Client, log *logger.Logger, cfg *config.SlackConfig, keyTTL time.Duration, notifiers ...Notifier) *Reporter {
+func New(redis *goredis.Client, log *logger.Logger, cfg *config.ReporterConfig, keyTTL time.Duration, notifiers ...Notifier) *Reporter {
 	return &Reporter{redis: redis, log: log, cfg: cfg, keyTTL: keyTTL, notifiers: notifiers, nowFunc: time.Now}
 }
 
@@ -60,13 +61,13 @@ func nextFireTime(now time.Time, hour, minute int) time.Time {
 // Reports fire daily at the configured UTC hour:minute.
 func (r *Reporter) Start(ctx context.Context) error {
 	r.log.Info().
-		Int("schedule_hour", r.cfg.ReportScheduleHour).
-		Int("schedule_minute", r.cfg.ReportScheduleMin).
+		Int("schedule_hour", r.cfg.ScheduleHour).
+		Int("schedule_minute", r.cfg.ScheduleMin).
 		Msg("reporter started")
 
 	for {
 		now := r.now()
-		next := nextFireTime(now, r.cfg.ReportScheduleHour, r.cfg.ReportScheduleMin)
+		next := nextFireTime(now, r.cfg.ScheduleHour, r.cfg.ScheduleMin)
 		delay := next.Sub(now)
 
 		r.log.Info().Time("next_fire", next).Dur("delay", delay).Msg("waiting for next report")
@@ -107,6 +108,7 @@ func (r *Reporter) runCycle(ctx context.Context, st *state) {
 			Status:        statusFailed,
 			Error:         err.Error(),
 			Count:         st.Count,
+			Pending:       st.Pending,
 		}); sErr != nil {
 			r.log.Error().Err(sErr).Msg("failed saving reporter state")
 		}
@@ -126,21 +128,26 @@ func (r *Reporter) runCycle(ctx context.Context, st *state) {
 		return
 	}
 
-	var sendErrs []error
-	for _, n := range r.notifiers {
+	// Determine which notifiers to send to.
+	// If previous cycle had partial failures, only retry those.
+	targets := filterPending(r.notifiers, st.Pending)
+
+	var failed []string
+	for _, n := range targets {
 		if err := n.Send(ctx, rpt); err != nil {
 			r.log.Error().Err(err).Str("notifier", n.Name()).Msg("notifier failed")
-			sendErrs = append(sendErrs, fmt.Errorf("%s: %w", n.Name(), err))
+			failed = append(failed, n.Name())
 		}
 	}
 
-	if err := errors.Join(sendErrs...); err != nil {
+	if len(failed) > 0 {
 		if sErr := r.saveState(ctx, &state{
 			LastAttemptAt: now.Unix(),
 			LastSuccessAt: st.LastSuccessAt,
 			Status:        statusFailed,
-			Error:         err.Error(),
+			Error:         fmt.Sprintf("failed notifiers: %s", strings.Join(failed, ", ")),
 			Count:         st.Count,
+			Pending:       failed,
 		}); sErr != nil {
 			r.log.Error().Err(sErr).Msg("failed saving reporter state")
 		}
@@ -160,6 +167,25 @@ func (r *Reporter) runCycle(ctx context.Context, st *state) {
 	r.pruneTimeline(ctx, now)
 }
 
+// filterPending returns only the notifiers whose names appear in pending.
+// If pending is empty, all notifiers are returned.
+func filterPending(all []Notifier, pending []string) []Notifier {
+	if len(pending) == 0 {
+		return all
+	}
+	set := make(map[string]bool, len(pending))
+	for _, name := range pending {
+		set[name] = true
+	}
+	filtered := make([]Notifier, 0, len(pending))
+	for _, n := range all {
+		if set[n.Name()] {
+			filtered = append(filtered, n)
+		}
+	}
+	return filtered
+}
+
 // pruneTimeline removes expired entries from the timeline sorted set.
 // Report data keys expire via Redis TTL, but their sorted set members
 // remain as orphans. This prevents unbounded memory growth.
@@ -177,10 +203,10 @@ func (r *Reporter) pruneTimeline(ctx context.Context, now time.Time) {
 
 func (r *Reporter) loadState(ctx context.Context) (*state, error) {
 	val, err := r.redis.Get(ctx, stateKey).Result()
-	if errors.Is(err, goredis.Nil) {
-		return &state{}, nil
-	}
 	if err != nil {
+		if goredis.Nil == err {
+			return &state{}, nil
+		}
 		return nil, fmt.Errorf("reading reporter state: %w", err)
 	}
 

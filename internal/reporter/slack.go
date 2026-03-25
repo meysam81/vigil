@@ -3,19 +3,11 @@ package reporter
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
-	"io"
-	"math/rand/v2"
-	"net"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
-
-	"github.com/meysam81/vigil/internal/config"
-	"github.com/meysam81/vigil/internal/logger"
 )
 
 const (
@@ -29,113 +21,33 @@ type slackPayload struct {
 
 // SlackNotifier sends formatted CSP reports to a Slack webhook.
 type SlackNotifier struct {
-	cfg    *config.SlackConfig
-	log    *logger.Logger
-	client *http.Client
+	webhook *WebhookSender
+	url     string
 }
 
-// NewSlackNotifier creates a SlackNotifier with a dedicated HTTP client.
-func NewSlackNotifier(cfg *config.SlackConfig, log *logger.Logger) *SlackNotifier {
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout: 5 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-		MaxIdleConns:          10,
-		IdleConnTimeout:       90 * time.Second,
-	}
-	return &SlackNotifier{
-		cfg: cfg,
-		log: log,
-		client: &http.Client{
-			Transport: transport,
-		},
-	}
+// NewSlackNotifier creates a SlackNotifier backed by the shared webhook sender.
+func NewSlackNotifier(url string, ws *WebhookSender) *SlackNotifier {
+	return &SlackNotifier{webhook: ws, url: url}
 }
 
 func (s *SlackNotifier) Name() string { return "slack" }
 
-// Send formats and delivers the report to Slack with retry and jitter.
+// Send formats and delivers the report to Slack.
 func (s *SlackNotifier) Send(ctx context.Context, rpt *report) error {
-	s.log.Debug().Int("violations", rpt.Total).Msg("preparing slack report")
-
-	msg := formatReport(rpt)
+	msg := formatSlackReport(rpt)
 
 	body, err := json.Marshal(slackPayload{Text: msg})
 	if err != nil {
 		return fmt.Errorf("marshaling slack payload: %w", err)
 	}
 
-	var lastErr error
-	attempts := 1 + s.cfg.MaxRetries
-	for i := range attempts {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		lastErr = s.post(ctx, body)
-		if lastErr == nil {
-			s.log.Info().Int("violations", rpt.Total).Msg("slack report delivered")
-			return nil
-		}
-
-		if i < attempts-1 {
-			delay := jitterDelay(s.cfg.RetryMinDelay, s.cfg.RetryMaxDelay)
-			s.log.Warn().Err(lastErr).Int("attempt", i+1).Dur("retry_in", delay).Msg("slack post failed, retrying")
-
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
-	}
-	return fmt.Errorf("slack delivery failed after %d attempts: %w", attempts, lastErr)
-}
-
-func (s *SlackNotifier) post(ctx context.Context, body []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.WebhookURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating slack request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("posting to slack: %w", err)
-	}
-	defer func() {
-		_, err = io.Copy(io.Discard, resp.Body)
-		if err != nil {
-			s.log.Error().Err(err).Msg("failed discarding http response")
-		}
-		err = resp.Body.Close()
-		if err != nil {
-			s.log.Error().Err(err).Msg("failed closing response body")
-		}
-	}()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("slack returned status %d", resp.StatusCode)
+	if err := s.webhook.Send(ctx, s.url, body); err != nil {
+		return fmt.Errorf("slack: %w", err)
 	}
 	return nil
 }
 
-// jitterDelay returns a random duration between min and max.
-func jitterDelay(min, max time.Duration) time.Duration {
-	minMs := min.Milliseconds()
-	maxMs := max.Milliseconds()
-	if maxMs <= minMs {
-		return min
-	}
-	return time.Duration(rand.Int64N(maxMs-minMs+1)+minMs) * time.Millisecond
-}
-
-func formatReport(rpt *report) string {
+func formatSlackReport(rpt *report) string {
 	var b bytes.Buffer
 
 	window := rpt.Until.Sub(rpt.Since).Truncate(time.Minute)

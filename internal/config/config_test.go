@@ -12,14 +12,15 @@ func validBase() *Config {
 		Server:    ServerConfig{Port: 8080, MaxBodySize: 65536},
 		Redis:     RedisConfig{Host: "localhost", Port: 6379},
 		RateLimit: RateLimitConfig{MaxRPS: 20, RefillRate: 2.0},
-		Slack: SlackConfig{
-			WebhookURL:         "https://hooks.slack.com/test",
-			ReportScheduleHour: 10,
-			ReportScheduleMin:  0,
-			MaxRetries:         5,
-			RetryMinDelay:      3 * time.Second,
-			RetryMaxDelay:      20 * time.Second,
+		Reporter: ReporterConfig{
+			ScheduleHour:  10,
+			ScheduleMin:   0,
+			MaxRetries:    5,
+			RetryMinDelay: 3 * time.Second,
+			RetryMaxDelay: 20 * time.Second,
 		},
+		Slack:   SlackConfig{WebhookURL: "https://hooks.slack.com/test"},
+		Discord: DiscordConfig{},
 	}
 }
 
@@ -33,10 +34,10 @@ func TestValidate_ScheduleHourBounds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := validBase()
-			cfg.Slack.ReportScheduleHour = tc.hour
+			cfg.Reporter.ScheduleHour = tc.hour
 			err := cfg.Validate()
 			if err == nil {
-				t.Fatalf("expected error for ReportScheduleHour=%d", tc.hour)
+				t.Fatalf("expected error for ScheduleHour=%d", tc.hour)
 			}
 			if !strings.Contains(err.Error(), "REPORT_SCHEDULE_HOUR") {
 				t.Errorf("error should mention REPORT_SCHEDULE_HOUR, got: %v", err)
@@ -55,10 +56,10 @@ func TestValidate_ScheduleMinuteBounds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := validBase()
-			cfg.Slack.ReportScheduleMin = tc.minute
+			cfg.Reporter.ScheduleMin = tc.minute
 			err := cfg.Validate()
 			if err == nil {
-				t.Fatalf("expected error for ReportScheduleMin=%d", tc.minute)
+				t.Fatalf("expected error for ScheduleMin=%d", tc.minute)
 			}
 			if !strings.Contains(err.Error(), "REPORT_SCHEDULE_MINUTE") {
 				t.Errorf("error should mention REPORT_SCHEDULE_MINUTE, got: %v", err)
@@ -87,30 +88,79 @@ func TestDeprecations_NoWarnings(t *testing.T) {
 	}
 }
 
+func TestDeprecations_SlackRetryVars(t *testing.T) {
+	t.Setenv("SLACK_MAX_RETRIES", "3")
+	t.Setenv("SLACK_RETRY_MIN_DELAY", "1s")
+	t.Setenv("SLACK_RETRY_MAX_DELAY", "10s")
+
+	cfg := validBase()
+	warnings := cfg.Deprecations()
+	if len(warnings) != 3 {
+		t.Fatalf("expected 3 deprecation warnings, got %d: %v", len(warnings), warnings)
+	}
+	for _, w := range warnings {
+		if !strings.Contains(w, "deprecated") {
+			t.Errorf("expected 'deprecated' in warning, got: %s", w)
+		}
+	}
+}
+
+func TestMigrateDeprecated_SlackRetryFallback(t *testing.T) {
+	t.Setenv("SLACK_MAX_RETRIES", "7")
+	t.Setenv("SLACK_RETRY_MIN_DELAY", "2s")
+	t.Setenv("SLACK_RETRY_MAX_DELAY", "30s")
+
+	cfg := validBase()
+	cfg.migrateDeprecated()
+
+	if cfg.Reporter.MaxRetries != 7 {
+		t.Errorf("MaxRetries: want 7, got %d", cfg.Reporter.MaxRetries)
+	}
+	if cfg.Reporter.RetryMinDelay != 2*time.Second {
+		t.Errorf("RetryMinDelay: want 2s, got %s", cfg.Reporter.RetryMinDelay)
+	}
+	if cfg.Reporter.RetryMaxDelay != 30*time.Second {
+		t.Errorf("RetryMaxDelay: want 30s, got %s", cfg.Reporter.RetryMaxDelay)
+	}
+}
+
+func TestMigrateDeprecated_NewVarsTakePrecedence(t *testing.T) {
+	t.Setenv("REPORT_MAX_RETRIES", "10")
+	t.Setenv("SLACK_MAX_RETRIES", "3")
+
+	cfg := validBase()
+	cfg.Reporter.MaxRetries = 10 // as if parsed from REPORT_MAX_RETRIES
+	cfg.migrateDeprecated()
+
+	if cfg.Reporter.MaxRetries != 10 {
+		t.Errorf("MaxRetries: want 10 (new var), got %d", cfg.Reporter.MaxRetries)
+	}
+}
+
 func TestValidate_RetryBounds(t *testing.T) {
 	cfg := validBase()
-	cfg.Slack.RetryMinDelay = 30 * time.Second
-	cfg.Slack.RetryMaxDelay = 5 * time.Second
+	cfg.Reporter.RetryMinDelay = 30 * time.Second
+	cfg.Reporter.RetryMaxDelay = 5 * time.Second
 
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected error for RetryMinDelay > RetryMaxDelay")
 	}
-	if !strings.Contains(err.Error(), "SLACK_RETRY_MIN_DELAY") {
-		t.Errorf("error should mention SLACK_RETRY_MIN_DELAY, got: %v", err)
+	if !strings.Contains(err.Error(), "REPORT_RETRY_MIN_DELAY") {
+		t.Errorf("error should mention REPORT_RETRY_MIN_DELAY, got: %v", err)
 	}
 }
 
 func TestValidate_NegativeMaxRetries(t *testing.T) {
 	cfg := validBase()
-	cfg.Slack.MaxRetries = -1
+	cfg.Reporter.MaxRetries = -1
 
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected error for MaxRetries < 0")
 	}
-	if !strings.Contains(err.Error(), "SLACK_MAX_RETRIES") {
-		t.Errorf("error should mention SLACK_MAX_RETRIES, got: %v", err)
+	if !strings.Contains(err.Error(), "REPORT_MAX_RETRIES") {
+		t.Errorf("error should mention REPORT_MAX_RETRIES, got: %v", err)
 	}
 }
 
@@ -196,4 +246,30 @@ func TestValidate_RateLimitBounds(t *testing.T) {
 			t.Errorf("expected RATELIMIT_REFILL in error, got: %v", err)
 		}
 	})
+}
+
+func TestValidate_DiscordWebhookURL(t *testing.T) {
+	cfg := validBase()
+	cfg.Discord.WebhookURL = "http://discord.com/api/webhooks/123/abc"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for non-HTTPS Discord webhook")
+	}
+	if !strings.Contains(err.Error(), "DISCORD_WEBHOOK_URL") {
+		t.Errorf("expected DISCORD_WEBHOOK_URL in error, got: %v", err)
+	}
+}
+
+func TestValidate_SlackWebhookHTTP(t *testing.T) {
+	cfg := validBase()
+	cfg.Slack.WebhookURL = "http://hooks.slack.com/test"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for non-HTTPS Slack webhook")
+	}
+	if !strings.Contains(err.Error(), "SLACK_WEBHOOK_URL") {
+		t.Errorf("expected SLACK_WEBHOOK_URL in error, got: %v", err)
+	}
 }

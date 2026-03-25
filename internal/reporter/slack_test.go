@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 	"github.com/meysam81/vigil/internal/logger"
 )
 
-func TestFormatReport(t *testing.T) {
+func TestFormatSlackReport(t *testing.T) {
 	rpt := &report{
 		Total: 42,
 		Since: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -52,7 +51,7 @@ func TestFormatReport(t *testing.T) {
 		},
 	}
 
-	msg := formatReport(rpt)
+	msg := formatSlackReport(rpt)
 
 	checks := []string{
 		"*Vigil CSP Report*",
@@ -73,7 +72,7 @@ func TestFormatReport(t *testing.T) {
 	}
 	for _, c := range checks {
 		if !strings.Contains(msg, c) {
-			t.Errorf("formatReport missing %q in:\n%s", c, msg)
+			t.Errorf("formatSlackReport missing %q in:\n%s", c, msg)
 		}
 	}
 }
@@ -118,28 +117,26 @@ func TestHumanDuration(t *testing.T) {
 	}
 }
 
-func TestSlackNotifier_Retry(t *testing.T) {
-	var attempts atomic.Int32
-
+func TestSlackNotifier_Send(t *testing.T) {
+	var received bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := attempts.Add(1)
-		if n <= 2 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+		received = true
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type: want application/json, got %s", ct)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
 	log := logger.NewLogger("error", true)
-	cfg := &config.SlackConfig{
-		WebhookURL:    srv.URL,
-		MaxRetries:    4,
+	cfg := &config.ReporterConfig{
+		MaxRetries:    0,
 		RetryMinDelay: time.Millisecond,
-		RetryMaxDelay: 5 * time.Millisecond,
+		RetryMaxDelay: time.Millisecond,
 	}
+	ws := NewWebhookSender(log, cfg)
+	notifier := NewSlackNotifier(srv.URL, ws)
 
-	notifier := NewSlackNotifier(cfg, log)
 	rpt := &report{
 		Total:      1,
 		Since:      time.Now().Add(-time.Hour),
@@ -154,43 +151,7 @@ func TestSlackNotifier_Retry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	got := attempts.Load()
-	if got != 3 {
-		t.Fatalf("attempts: want 3, got %d", got)
-	}
-}
-
-func TestSlackNotifier_ContextCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	log := logger.NewLogger("error", true)
-	cfg := &config.SlackConfig{
-		WebhookURL:    srv.URL,
-		MaxRetries:    10,
-		RetryMinDelay: time.Second,
-		RetryMaxDelay: 2 * time.Second,
-	}
-
-	notifier := NewSlackNotifier(cfg, log)
-	rpt := &report{
-		Total:      1,
-		Since:      time.Now().Add(-time.Hour),
-		Until:      time.Now(),
-		Directives: map[string]int{"script-src": 1},
-		Origins:    map[string]int{"example.com": 1},
-		Pages:      map[string]int{"/": 1},
-		Browsers:   map[string]int{"Chrome": 1},
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
-
-	err := notifier.Send(ctx, rpt)
-	if err == nil {
-		t.Fatal("expected error for cancelled context")
+	if !received {
+		t.Fatal("server did not receive the request")
 	}
 }

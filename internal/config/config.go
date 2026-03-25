@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,13 +35,24 @@ type CORSConfig struct {
 	AllowedOrigins string `env:"CORS_ALLOWED_ORIGINS" envDefault:"*"`
 }
 
+// ReporterConfig controls the daily aggregate reporter schedule and retry behaviour.
+// These settings apply to all notifiers (Slack, Discord, etc.).
+type ReporterConfig struct {
+	ScheduleHour  int           `env:"REPORT_SCHEDULE_HOUR"      envDefault:"10"`
+	ScheduleMin   int           `env:"REPORT_SCHEDULE_MINUTE"    envDefault:"0"`
+	MaxRetries    int           `env:"REPORT_MAX_RETRIES"        envDefault:"5"`
+	RetryMinDelay time.Duration `env:"REPORT_RETRY_MIN_DELAY"    envDefault:"3s"`
+	RetryMaxDelay time.Duration `env:"REPORT_RETRY_MAX_DELAY"    envDefault:"20s"`
+}
+
+// SlackConfig holds the Slack webhook URL.
 type SlackConfig struct {
-	WebhookURL         string        `env:"SLACK_WEBHOOK_URL"`
-	ReportScheduleHour int           `env:"REPORT_SCHEDULE_HOUR"  envDefault:"10"`
-	ReportScheduleMin  int           `env:"REPORT_SCHEDULE_MINUTE" envDefault:"0"`
-	MaxRetries         int           `env:"SLACK_MAX_RETRIES"     envDefault:"5"`
-	RetryMinDelay      time.Duration `env:"SLACK_RETRY_MIN_DELAY" envDefault:"3s"`
-	RetryMaxDelay      time.Duration `env:"SLACK_RETRY_MAX_DELAY" envDefault:"20s"`
+	WebhookURL string `env:"SLACK_WEBHOOK_URL"`
+}
+
+// DiscordConfig holds the Discord webhook URL.
+type DiscordConfig struct {
+	WebhookURL string `env:"DISCORD_WEBHOOK_URL"`
 }
 
 type Config struct {
@@ -49,7 +61,9 @@ type Config struct {
 	Redis     RedisConfig
 	RateLimit RateLimitConfig
 	CORS      CORSConfig
+	Reporter  ReporterConfig
 	Slack     SlackConfig
+	Discord   DiscordConfig
 }
 
 func Load() (*Config, error) {
@@ -57,7 +71,34 @@ func Load() (*Config, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
+	cfg.migrateDeprecated()
 	return cfg, nil
+}
+
+// migrateDeprecated copies values from deprecated SLACK_* retry env vars
+// into ReporterConfig when the new REPORT_* equivalents are not set.
+func (c *Config) migrateDeprecated() {
+	if os.Getenv("REPORT_MAX_RETRIES") == "" {
+		if v := os.Getenv("SLACK_MAX_RETRIES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				c.Reporter.MaxRetries = n
+			}
+		}
+	}
+	if os.Getenv("REPORT_RETRY_MIN_DELAY") == "" {
+		if v := os.Getenv("SLACK_RETRY_MIN_DELAY"); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				c.Reporter.RetryMinDelay = d
+			}
+		}
+	}
+	if os.Getenv("REPORT_RETRY_MAX_DELAY") == "" {
+		if v := os.Getenv("SLACK_RETRY_MAX_DELAY"); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				c.Reporter.RetryMaxDelay = d
+			}
+		}
+	}
 }
 
 func (c *Config) Validate() error {
@@ -87,17 +128,21 @@ func (c *Config) Validate() error {
 	if url := strings.TrimSpace(c.Slack.WebhookURL); url != "" && !strings.HasPrefix(url, "https://") {
 		errs = append(errs, errors.New("SLACK_WEBHOOK_URL must use https://"))
 	}
-	if c.Slack.ReportScheduleHour < 0 || c.Slack.ReportScheduleHour > 23 {
+	if url := strings.TrimSpace(c.Discord.WebhookURL); url != "" && !strings.HasPrefix(url, "https://") {
+		errs = append(errs, errors.New("DISCORD_WEBHOOK_URL must use https://"))
+	}
+
+	if c.Reporter.ScheduleHour < 0 || c.Reporter.ScheduleHour > 23 {
 		errs = append(errs, errors.New("REPORT_SCHEDULE_HOUR must be between 0 and 23"))
 	}
-	if c.Slack.ReportScheduleMin < 0 || c.Slack.ReportScheduleMin > 59 {
+	if c.Reporter.ScheduleMin < 0 || c.Reporter.ScheduleMin > 59 {
 		errs = append(errs, errors.New("REPORT_SCHEDULE_MINUTE must be between 0 and 59"))
 	}
-	if c.Slack.MaxRetries < 0 {
-		errs = append(errs, errors.New("SLACK_MAX_RETRIES must be >= 0"))
+	if c.Reporter.MaxRetries < 0 {
+		errs = append(errs, errors.New("REPORT_MAX_RETRIES must be >= 0"))
 	}
-	if c.Slack.RetryMinDelay > c.Slack.RetryMaxDelay {
-		errs = append(errs, errors.New("SLACK_RETRY_MIN_DELAY must be <= SLACK_RETRY_MAX_DELAY"))
+	if c.Reporter.RetryMinDelay > c.Reporter.RetryMaxDelay {
+		errs = append(errs, errors.New("REPORT_RETRY_MIN_DELAY must be <= REPORT_RETRY_MAX_DELAY"))
 	}
 
 	return errors.Join(errs...)
@@ -108,6 +153,16 @@ func (c *Config) Deprecations() []string {
 	var warnings []string
 	if os.Getenv("REPORT_INTERVAL") != "" {
 		warnings = append(warnings, "REPORT_INTERVAL is deprecated; use REPORT_SCHEDULE_HOUR and REPORT_SCHEDULE_MINUTE instead")
+	}
+	deprecated := []struct{ old, replacement string }{
+		{"SLACK_MAX_RETRIES", "REPORT_MAX_RETRIES"},
+		{"SLACK_RETRY_MIN_DELAY", "REPORT_RETRY_MIN_DELAY"},
+		{"SLACK_RETRY_MAX_DELAY", "REPORT_RETRY_MAX_DELAY"},
+	}
+	for _, d := range deprecated {
+		if os.Getenv(d.old) != "" {
+			warnings = append(warnings, fmt.Sprintf("%s is deprecated; use %s instead", d.old, d.replacement))
+		}
 	}
 	return warnings
 }
