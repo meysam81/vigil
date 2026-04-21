@@ -106,7 +106,7 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@v0
       - name: Setup Cosign CLI
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.1
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
         with:
