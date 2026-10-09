@@ -1,6 +1,6 @@
 module github.com/meysam81/vigil
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/caarlos0/env/v11 v11.4.0
@@ -12,7 +12,7 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/urfave/cli/v3 v3.7.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.24.0
 )
 
 require (
