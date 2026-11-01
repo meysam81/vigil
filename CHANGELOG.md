@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/meysam81/vigil/compare/v0.3.0...v0.3.1) (2026-11-01)
+
+
+### CI
+
+* pin actions to commit SHAs, renovate on the shared preset, release-please manifest config ([#42](https://github.com/meysam81/vigil/issues/42)) ([74d8418](https://github.com/meysam81/vigil/commit/74d8418e5f4155337ecb73c6f11eb83adc0ea755))
+
 ## [0.3.0](https://github.com/meysam81/vigil/compare/v0.2.0...v0.3.0) (2026-03-25)
 
 
