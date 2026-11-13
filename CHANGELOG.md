@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/meysam81/vigil/compare/v0.3.0...v0.3.1) (2026-11-13)
+
+
+### CI
+
+* pin actions to commit SHAs, renovate on the shared preset, release-please manifest config ([#42](https://github.com/meysam81/vigil/issues/42)) ([74d8418](https://github.com/meysam81/vigil/commit/74d8418e5f4155337ecb73c6f11eb83adc0ea755))
+* pin pre-commit hooks and CI tool versions ([#52](https://github.com/meysam81/vigil/issues/52)) ([4b65c3a](https://github.com/meysam81/vigil/commit/4b65c3a3fbdb1e0ed7faa3f7d66b96f017eccd3c))
+
 ## [0.3.0](https://github.com/meysam81/vigil/compare/v0.2.0...v0.3.0) (2026-03-25)
 
 
